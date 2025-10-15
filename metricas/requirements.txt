@@ -1,0 +1,19 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+fastapi==0.119.0
+uvicorn[standard]==0.30.6
+numpy==1.26.4
+pandas==2.3.3
+
+# Métricas
+bert-score==0.3.13
+transformers==4.30.2
+tokenizers==0.13.3
+textstat==0.7.4
+nltk==3.9.2
+spacy==3.8.7
+
+# AlignScore & deps
+torch==1.13.1
+pytorch-lightning==1.9.5
+alignscore @ git+https://github.com/yuh-zha/AlignScore.git@a0936d5afee642a46b22f6c02a163478447aa493

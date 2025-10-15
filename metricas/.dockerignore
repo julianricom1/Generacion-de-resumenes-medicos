@@ -1,0 +1,24 @@
+# entornos/artefactos pesados
+.venv
+.venv_*/
+venv/
+ENV/
+**/__pycache__/
+*.pyc
+
+# pesos y caches
+models/
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.safetensors
+.huggingface/
+.cache/
+**/.cache/
+
+# repos/experimentos locales
+AlignScore/
+lightning_logs/
+wandb/
+data/

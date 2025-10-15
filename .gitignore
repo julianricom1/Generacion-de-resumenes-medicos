@@ -205,3 +205,33 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# === Model checkpoints & large weights ===
+*.ckpt
+*.ckpt.*
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Common trainer outputs
+checkpoints/
+**/checkpoints/
+lightning_logs/
+wandb/
+
+# Project-specific: model artifacts (do NOT commit ckpts)
+metricas/models/
+**/models/
+
+# Avoid embedded repos
+metricas/AlignScore/
+
+# Hugging Face / cache (local-only)
+.huggingface/
+**/huggingface/
+.cache/
+**/.cache/
+
+# Keep targets.json versioned
+!metricas/targets.json
