@@ -233,5 +233,10 @@ metricas/AlignScore/
 .cache/
 **/.cache/
 
+
+**/.venv/
+**/.venv_*/
+**/.venv_metrics/
+
 # Keep targets.json versioned
 !metricas/targets.json

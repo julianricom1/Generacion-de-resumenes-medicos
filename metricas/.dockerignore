@@ -22,3 +22,8 @@ AlignScore/
 lightning_logs/
 wandb/
 data/
+
+# envs
+**/.venv/
+**/.venv_*/
+**/.venv_metrics/
