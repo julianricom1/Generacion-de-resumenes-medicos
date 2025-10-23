@@ -1,0 +1,318 @@
+{
+  "info": {
+    "name": "Text Metrics – API Sanity Suite",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "e6f7a8b4-aaaa-bbbb-cccc-ddddeeefff00"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "healthz",
+          "request": {
+            "method": "GET",
+            "url": { "raw": "{{base_url}}/healthz", "host": ["{{base_url}}"], "path": ["healthz"] }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test(\"200 or 503\", ()=> pm.response.code === 200 || pm.response.code === 503);",
+                  "if (pm.response.code === 200) {",
+                  "  const j = pm.response.json();",
+                  "  pm.test(\"models ready\", ()=> j.relevance.ready && j.factuality.ready && j.readability.ready);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Loss (anchored to ORIGINAL)",
+      "item": [
+        {
+          "name": "Relevance — GOOD (generated ~ original)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/loss", "host": ["{{base_url}}"], "path": ["loss"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts_original\": [\"Insulin decreases blood glucose.\"],\n  \"texts_human\":     [\"(ignored)\"],\n  \"texts_generated\": [\"Insulin lowers blood sugar.\"],\n  \"weights\": [1,0,0,0,0]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "const val = Number(pm.response.text());",
+              "pm.environment.set('loss_rel_good', val);",
+              "pm.test('loss is number', ()=> Number.isFinite(val));"
+            ]}}
+          ]
+        },
+        {
+          "name": "Relevance — BAD (unrelated to original)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/loss", "host": ["{{base_url}}"], "path": ["loss"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts_original\": [\"Insulin decreases blood glucose.\"],\n  \"texts_human\":     [\"(ignored)\"],\n  \"texts_generated\": [\"Bananas cause computers to melt.\"],\n  \"weights\": [1,0,0,0,0]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "const bad = Number(pm.response.text());",
+              "const good = Number(pm.environment.get('loss_rel_good'));",
+              "pm.test('BAD > GOOD (relevance)', ()=> bad > good);"
+            ]}}
+          ]
+        },
+        {
+          "name": "Factuality — GOOD (consistent with original)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/loss", "host": ["{{base_url}}"], "path": ["loss"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts_original\": [\"Aspirin reduces the risk of blood clots.\"],\n  \"texts_human\":     [\"(ignored)\"],\n  \"texts_generated\": [\"Aspirin lowers the risk of clot formation.\"],\n  \"weights\": [0,1,0,0,0]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "pm.environment.set('loss_fac_good', Number(pm.response.text()));"
+            ]}}
+          ]
+        },
+        {
+          "name": "Factuality — BAD (contradiction)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/loss", "host": ["{{base_url}}"], "path": ["loss"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts_original\": [\"Aspirin reduces the risk of blood clots.\"],\n  \"texts_human\":     [\"(ignored)\"],\n  \"texts_generated\": [\"Aspirin increases the risk of blood clots.\"],\n  \"weights\": [0,1,0,0,0]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "const bad = Number(pm.response.text());",
+              "const good = Number(pm.environment.get('loss_fac_good'));",
+              "pm.test('BAD > GOOD (factuality)', ()=> bad > good);"
+            ]}}
+          ]
+        },
+        {
+          "name": "FKGL — GOOD (closer to target)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/loss", "host": ["{{base_url}}"], "path": ["loss"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts_original\": [\"The heart pumps blood throughout the body.\"],\n  \"texts_human\":     [\"(ignored)\"],\n  \"texts_generated\": [\"The pharmacological management of type 2 diabetes frequently involves metformin administration, as clinicians evaluate glycemic trajectories and comorbidities.\"],\n  \"weights\": [0,0,1,0,0]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "pm.environment.set('loss_fkgl_good', Number(pm.response.text()));"
+            ]}}
+          ]
+        },
+        {
+          "name": "FKGL — BAD (very simple)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/loss", "host": ["{{base_url}}"], "path": ["loss"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts_original\": [\"The heart pumps blood throughout the body.\"],\n  \"texts_human\":     [\"(ignored)\"],\n  \"texts_generated\": [\"The medicine helps. It lowers sugar. It is safe for most people. Doctors check you often.\"],\n  \"weights\": [0,0,1,0,0]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "pm.test('BAD > GOOD (fkgl)', ()=> Number(pm.response.text()) > Number(pm.environment.get('loss_fkgl_good')) );"
+            ]}}
+          ]
+        },
+        {
+          "name": "SMOG — GOOD (closer to target)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/loss", "host": ["{{base_url}}"], "path": ["loss"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts_original\": [\"Insulin decreases blood glucose.\"],\n  \"texts_human\":     [\"(ignored)\"],\n  \"texts_generated\": [\"The pharmacological management of type 2 diabetes frequently involves metformin administration, as clinicians evaluate glycemic trajectories and comorbidities.\"],\n  \"weights\": [0,0,0,1,0]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "pm.environment.set('loss_smog_good', Number(pm.response.text()));"
+            ]}}
+          ]
+        },
+        {
+          "name": "SMOG — BAD (very simple)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/loss", "host": ["{{base_url}}"], "path": ["loss"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts_original\": [\"Insulin decreases blood glucose.\"],\n  \"texts_human\":     [\"(ignored)\"],\n  \"texts_generated\": [\"The medicine helps. It lowers sugar. It is safe for most people. Doctors check you often.\"],\n  \"weights\": [0,0,0,1,0]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "pm.test('BAD > GOOD (smog)', ()=> Number(pm.response.text()) > Number(pm.environment.get('loss_smog_good')) );"
+            ]}}
+          ]
+        },
+        {
+          "name": "Dale-Chall — GOOD (hard vocab)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/loss", "host": ["{{base_url}}"], "path": ["loss"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts_original\": [\"The lungs help you breathe air.\"],\n  \"texts_human\":     [\"(ignored)\"],\n  \"texts_generated\": [\"Therapeutic regimens necessitate meticulous titration, incorporating contraindications and idiosyncratic responses to mitigate iatrogenic sequelae.\"],\n  \"weights\": [0,0,0,0,1]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "pm.environment.set('loss_dale_good', Number(pm.response.text()));"
+            ]}}
+          ]
+        },
+        {
+          "name": "Dale-Chall — BAD (very simple)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/loss", "host": ["{{base_url}}"], "path": ["loss"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts_original\": [\"The lungs help you breathe air.\"],\n  \"texts_human\":     [\"(ignored)\"],\n  \"texts_generated\": [\"The treatment plan is simple. The doctor changes the dose slowly to keep you safe.\"],\n  \"weights\": [0,0,0,0,1]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "pm.test('BAD > GOOD (dale)', ()=> Number(pm.response.text()) > Number(pm.environment.get('loss_dale_good')) );"
+            ]}}
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Metrics (raw)",
+      "item": [
+        {
+          "name": "metrics/relevance — GOOD (generated ~ original)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/metrics/relevance", "host": ["{{base_url}}"], "path": ["metrics","relevance"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts_original\": [\"Insulin decreases blood glucose.\"],\n  \"texts_generated\": [\"Insulin lowers blood sugar.\"]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "const s = pm.response.json().scores[0];",
+              "pm.environment.set('rel_score_good', s);",
+              "pm.test('score in [0,1]', ()=> s>=0 && s<=1);"
+            ]}}
+          ]
+        },
+        {
+          "name": "metrics/relevance — BAD (unrelated to original)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/metrics/relevance", "host": ["{{base_url}}"], "path": ["metrics","relevance"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts_original\": [\"Insulin decreases blood glucose.\"],\n  \"texts_generated\": [\"Bananas cause computers to melt.\"]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "const s = pm.response.json().scores[0];",
+              "pm.test('BAD < GOOD (relevance raw)', ()=> s < Number(pm.environment.get('rel_score_good')) );"
+            ]}}
+          ]
+        },
+        {
+          "name": "metrics/factuality — GOOD",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/metrics/factuality", "host": ["{{base_url}}"], "path": ["metrics","factuality"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts_original\": [\"Aspirin reduces the risk of blood clots.\"],\n  \"texts_generated\": [\"Aspirin reduces the risk of blood clots.\"]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "const s = pm.response.json().scores[0];",
+              "pm.environment.set('fac_score_good', s);",
+              "pm.test('score in [0,1]', ()=> s>=0 && s<=1);"
+            ]}}
+          ]
+        },
+        {
+          "name": "metrics/factuality — BAD",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/metrics/factuality", "host": ["{{base_url}}"], "path": ["metrics","factuality"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts_original\": [\"Aspirin reduces the risk of blood clots.\"],\n  \"texts_generated\": [\"Aspirin increases the risk of blood clots.\"]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "const s = pm.response.json().scores[0];",
+              "pm.test('BAD < GOOD (factuality raw)', ()=> s < Number(pm.environment.get('fac_score_good')) );"
+            ]}}
+          ]
+        },
+        {
+          "name": "metrics/readability — simple vs dense",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{base_url}}/metrics/readability", "host": ["{{base_url}}"], "path": ["metrics","readability"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"texts\": [\n    \"The medicine helps. It lowers sugar. It is safe for most people. Doctors check you often.\",\n    \"The pharmacological management of type 2 diabetes frequently involves metformin administration, as clinicians evaluate glycemic trajectories, cardiovascular comorbidities, and contraindications to optimize adherence.\"\n  ]\n}"
+            }
+          },
+          "event": [
+            { "listen": "test", "script": { "exec": [
+              "const j = pm.response.json();",
+              "pm.test('fkgl[dense] > fkgl[simple]', ()=> j.fkgl[1] > j.fkgl[0]);",
+              "pm.test('smog[dense] > smog[simple]', ()=> j.smog[1] > j.smog[0]);",
+              "pm.test('dale[dense] >= dale[simple]', ()=> j.dale_chall[1] >= j.dale_chall[0]);"
+            ]}}
+          ]
+        }
+      ]
+    }
+  ]
+}

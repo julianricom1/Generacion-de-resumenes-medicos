@@ -3,6 +3,7 @@ import os
 import json
 import numpy as np
 import pandas as pd
+from tqdm.auto import tqdm
 from fastapi import FastAPI, HTTPException
 from schemas.schemas import RelevanceRequest, FactualityRequest, ReadabilityRequest, LossRequest
 from utils.relevance import (
@@ -30,11 +31,11 @@ app = FastAPI(title="Text Metrics API", version="0.1.0")
 # =========================
 # TARGETS (defaults)
 # =========================
-TARGET_RELEVANCE = 0.5
-TARGET_FACTUALITY = 0.5
-TARGET_FKGL = 8.0
-TARGET_SMOG = 8.0
-TARGET_DALECHALL = 6.0
+TARGET_RELEVANCE = 0.853
+TARGET_FACTUALITY = 0.436
+TARGET_FKGL = 13.707
+TARGET_SMOG = 15.109
+TARGET_DALECHALL = 11.624
 
 def load_targets(path: str) -> bool:
     """Carga TARGET_* desde un JSON si existe. Devuelve True si cargó."""
@@ -51,41 +52,84 @@ def load_targets(path: str) -> bool:
     })
     return True
 
-def calibrateTargets(path: str, update_globals: bool = True, save_to: str | None = None):
+def calibrateTargets(
+    path: str,
+    update_globals: bool = True,
+    save_to: str | None = None,
+    *,
+    subset: float = 1.0,         # 0 < subset <= 1.0 (porcentaje del dataset)
+    seed: int = 42,
+    chunk_size: int = 16,        # tamaño de lote para mostrar progreso
+    progress: bool = True,
+):
     """
-    Lee un CSV con columnas: 'original' y 'plain' (texto humano),
-    calcula promedios y opcionalmente:
-      - actualiza los TARGET_* en memoria (update_globals=True)
-      - guarda a JSON (save_to='targets.json')
-    Devuelve siempre un dict con los nuevos valores calculados.
+    Lee un CSV con columnas: 'source_text' y 'target_text'.
+    Toma un subconjunto (subset ∈ (0,1]) y calcula promedios de métricas.
+    Opcionalmente actualiza TARGET_* en memoria y guarda a JSON.
     """
+    if not (0.0 < subset <= 1.0):
+        raise ValueError("subset debe estar en (0, 1].")
+
     df = pd.read_csv(path)
-    required = {"original", "plain"}
+    required = {"source_text", "target_text"}
     if not required.issubset(df.columns):
         raise ValueError(f"Faltan columnas requeridas: {required - set(df.columns)}")
 
-    df = df[["original", "plain"]].dropna()
-    df = df[(df["original"].str.strip() != "") & (df["plain"].str.strip() != "")]
+    # limpieza mínima
+    df = df[["source_text", "target_text"]].dropna()
+    df = df[
+        (df["source_text"].astype(str).str.strip() != "") &
+        (df["target_text"].astype(str).str.strip() != "")
+    ]
     if df.empty:
         raise ValueError("No hay filas válidas después de limpieza.")
 
-    originals = df["original"].tolist()
-    humans    = df["plain"].tolist()
+    # muestreo
+    if subset < 1.0:
+        df = df.sample(frac=subset, random_state=seed).reset_index(drop=True)
 
-    relevances = compute_relevance(humans, originals)        # List[float] en [0,1]
-    factuals   = compute_factuality(originals, humans)       # List[float] en [0,1]
-    rdict      = compute_readability(humans)                 # Dict[str, List[float]]
-    fkgls      = rdict["fkgl"]
-    smogs      = rdict["smog"]
-    dales      = rdict["dale_chall"]
+    originals = df["source_text"].tolist()
+    humans    = df["target_text"].tolist()
+    n = len(df)
+
+    # helpers de progreso
+    def _tqdm(total, desc):
+        return tqdm(total=total, desc=desc, unit="txt", disable=not progress)
+
+    # --- Relevance (BERTScore) por chunks ---
+    rel_all = []
+    with _tqdm(n, "relevance") as bar:
+        for i in range(0, n, chunk_size):
+            j = min(i + chunk_size, n)
+            rel_all.extend(compute_relevance(originals[i:j], humans[i:j]))
+            bar.update(j - i)
+
+    # --- Factuality (AlignScore) por chunks ---
+    fac_all = []
+    with _tqdm(n, "factuality") as bar:
+        for i in range(0, n, chunk_size):
+            j = min(i + chunk_size, n)
+            fac_all.extend(compute_factuality(originals[i:j], humans[i:j]))
+            bar.update(j - i)
+
+    # --- Readability (suele ser rápido; igual usamos chunks para consistencia) ---
+    fkgl_all, smog_all, dale_all = [], [], []
+    with _tqdm(n, "readability") as bar:
+        for i in range(0, n, chunk_size):
+            j = min(i + chunk_size, n)
+            rd = compute_readability(humans[i:j])
+            fkgl_all.extend(rd["fkgl"])
+            smog_all.extend(rd["smog"])
+            dale_all.extend(rd["dale_chall"])
+            bar.update(j - i)
 
     new_vals = {
-        "TARGET_RELEVANCE":  float(np.mean(relevances)),
-        "TARGET_FACTUALITY": float(np.mean(factuals)),
-        "TARGET_FKGL":       float(np.mean(fkgls)),
-        "TARGET_SMOG":       float(np.mean(smogs)),
-        "TARGET_DALECHALL":  float(np.mean(dales)),
-        "n_samples":         int(len(df)),
+        "TARGET_RELEVANCE":  float(np.mean(rel_all)),
+        "TARGET_FACTUALITY": float(np.mean(fac_all)),
+        "TARGET_FKGL":       float(np.mean(fkgl_all)),
+        "TARGET_SMOG":       float(np.mean(smog_all)),
+        "TARGET_DALECHALL":  float(np.mean(dale_all)),
+        "n_samples":         int(n),
     }
 
     if update_globals:
@@ -102,6 +146,7 @@ def calibrateTargets(path: str, update_globals: bool = True, save_to: str | None
             json.dump({k: v for k, v in new_vals.items() if k != "n_samples"}, f, ensure_ascii=False, indent=2)
 
     return new_vals
+
 
 # =========================
 # STARTUP
@@ -156,13 +201,15 @@ async def healthz():
 # =========================
 @app.post("/metrics/relevance")
 async def relevance(req: RelevanceRequest):
-    scores = compute_relevance(req.texts_generated, req.texts_human)
-    return {"scores": scores, "model": BERTSCORE_MODEL, "device": BERT_DEVICE}
+# handler
+    scores = compute_relevance(req.texts_original, req.texts_generated)
+    return {"relevance": scores, "model": BERTSCORE_MODEL, "device": BERT_DEVICE}
+
 
 @app.post("/metrics/factuality")
 async def factuality(req: FactualityRequest):
     scores = compute_factuality(req.texts_original, req.texts_generated)
-    return {"scores": scores, "model": ALIGNSCORE_MODEL, "device": ALIGN_DEVICE}
+    return {"factuality": scores, "model": ALIGNSCORE_MODEL, "device": ALIGN_DEVICE}
 
 @app.post("/metrics/readability")
 async def readability(req: ReadabilityRequest):
@@ -172,6 +219,21 @@ async def readability(req: ReadabilityRequest):
 # =========================
 # LOSS
 # =========================
+
+# --- tolerancias fijas para mapear legibilidad a [0,1] ---
+# TOLERANCIAS para legibilidad (hard-coded)
+B_FKGL = 2.0
+B_SMOG = 2.0
+B_DALECHALL = 1.0
+
+def _sigmoid_centered_err(x, center, b):
+    """
+    0 en el centro (TARGET_*), crece ~1 al alejarse; salida en [0,1].
+    """
+    x = np.asarray(x, dtype=np.float32)
+    s = 1.0 / (1.0 + np.exp(-(x - float(center)) / float(b)))
+    return 2.0 * np.abs(s - 0.5)  # [0,1]
+
 @app.post("/loss")
 async def loss(req: LossRequest):
     n = len(req.texts_generated)
@@ -183,26 +245,26 @@ async def loss(req: LossRequest):
     if not np.isclose(w.sum(), 1.0, atol=1e-6):
         raise HTTPException(status_code=400, detail="La suma de weights debe ser 1.0.")
 
-    # Métricas crudas 
-    rel  = np.asarray(compute_relevance(req.texts_generated, req.texts_human), dtype=np.float32)      # [0,1]
-    fac  = np.asarray(compute_factuality(req.texts_original, req.texts_generated), dtype=np.float32)  # [0,1]
+    # --- métricas crudas (orden armonizado) ---
+    rel = np.asarray(compute_relevance(req.texts_original, req.texts_generated), dtype=np.float32) # [0,1]
+    fac  = np.asarray(compute_factuality(req.texts_original, req.texts_generated), dtype=np.float32) # [0,1]
+
     rd   = compute_readability(req.texts_generated)
-    fkgl = np.asarray(rd["fkgl"], dtype=np.float32)           # [0, +inf)
-    smog = np.asarray(rd["smog"], dtype=np.float32)           # [0, +inf)
-    dale = np.asarray(rd["dale_chall"], dtype=np.float32)     # ~[0,10]
+    fkgl = np.asarray(rd["fkgl"], dtype=np.float32)        # [0, +inf)
+    smog = np.asarray(rd["smog"], dtype=np.float32)        # [0, +inf)
+    dale = np.asarray(rd["dale_chall"], dtype=np.float32)  # ~[0,16]
 
-    # Pérdidas por métrica:
-    # Relevance / Factuality: L2 directo contra su target
-    l_rel = (rel - float(TARGET_RELEVANCE))**2
-    l_fac = (fac - float(TARGET_FACTUALITY))**2
+    # --- errores normalizados en [0,1] ---
+    # Relevance / Factuality: L2 directo contra su TARGET (ya en [0,1])
+    e_rel = (rel - float(TARGET_RELEVANCE))**2
+    e_fac = (fac - float(TARGET_FACTUALITY))**2
 
-    # Legibilidad: error cuadrático estandarizado respecto a su centro (TARGET_* = centros)
-    # b = tolerancia en unidades de la métrica (sin crear nuevas constantes)
-    l_fkgl = ((fkgl - float(TARGET_FKGL)) / 2.0)**2
-    l_smog = ((smog - float(TARGET_SMOG)) / 2.0)**2
-    l_dale = ((dale - float(TARGET_DALECHALL)) / 1.0)**2
+    # Legibilidad: sigmoide centrada en TARGET_* (0 en el centro)
+    e_fkgl = _sigmoid_centered_err(fkgl, TARGET_FKGL, B_FKGL)
+    e_smog = _sigmoid_centered_err(smog, TARGET_SMOG, B_SMOG)
+    e_dale = _sigmoid_centered_err(dale, TARGET_DALECHALL, B_DALECHALL)
 
-    L = np.stack([l_rel, l_fac, l_fkgl, l_smog, l_dale], axis=1)   # (n,5)
-    loss_per_sample = (L @ w).astype(float)                        # (n,)
+    E = np.stack([e_rel, e_fac, e_fkgl, e_smog, e_dale], axis=1)  # (n,5)
+    loss_per_sample = (E @ w).astype(float)                       # ∈ [0,1]
 
     return float(loss_per_sample[0]) if n == 1 else loss_per_sample.tolist()
