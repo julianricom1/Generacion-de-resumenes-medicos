@@ -222,9 +222,9 @@ async def readability(req: ReadabilityRequest):
 
 # --- tolerancias fijas para mapear legibilidad a [0,1] ---
 # TOLERANCIAS para legibilidad (hard-coded)
-B_FKGL = 2.0
-B_SMOG = 2.0
-B_DALECHALL = 1.0
+B_FKGL = 3.0
+B_SMOG = 5.0
+B_DALECHALL = 2.5
 
 def _sigmoid_centered_err(x, center, b):
     """
