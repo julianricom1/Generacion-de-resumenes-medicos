@@ -31,13 +31,35 @@ def _get_scorer():
 
 def compute_factuality(texts_original: List[str], texts_generated: List[str]) -> List[float]:
     """
-    texts_generated: lista de resúmenes/claims
-    texts_original:  lista de textos fuente (misma longitud)
-    return: lista de puntajes float
+    Devuelve puntajes AlignScore en [0,1] por par. 
+    Si algún texto está vacío (tras strip) o AlignScore falla en un par, retorna 0.0 para ese caso.
     """
     assert len(texts_generated) == len(texts_original), "texts_generated y texts_original deben tener la misma longitud"
     scorer = _get_scorer()
-    return scorer.score(contexts=texts_original, claims=texts_generated)
+
+    # Normalización básica y detección de pares válidos
+    ctx = [(c or "").strip() for c in texts_original]
+    hyp = [(h or "").strip() for h in texts_generated]
+    n = len(ctx)
+
+    valid_idx = [i for i in range(n) if ctx[i] and hyp[i]]
+    scores = [0.0] * n  # Para pares inválidos o con error
+
+    if not valid_idx:
+        return scores  
+
+    try:
+        # Evalúa sólo pares válidos y reubica resultados
+        out = scorer.score(
+            contexts=[ctx[i] for i in valid_idx],
+            claims=[hyp[i] for i in valid_idx]
+        )
+        for j, i in enumerate(valid_idx):
+            scores[i] = float(out[j])
+    except Exception as e:
+        print(f"[factuality] AlignScore error: {e}")
+
+    return scores
 
 def warmup_factuality():
     """Descarga recursos necesarios."""
