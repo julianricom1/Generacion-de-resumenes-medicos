@@ -1,4 +1,13 @@
 {
+  "additional_special_tokens": [
+    {
+      "content": "<|sentence_end|>",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false
+    }
+  ],
   "bos_token": {
     "content": "<|begin_of_text|>",
     "lstrip": false,

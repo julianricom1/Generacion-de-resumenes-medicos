@@ -2047,8 +2047,19 @@
       "rstrip": false,
       "single_word": false,
       "special": true
+    },
+    "128256": {
+      "content": "<|sentence_end|>",
+      "lstrip": false,
+      "normalized": false,
+      "rstrip": false,
+      "single_word": false,
+      "special": true
     }
   },
+  "additional_special_tokens": [
+    "<|sentence_end|>"
+  ],
   "bos_token": "<|begin_of_text|>",
   "clean_up_tokenization_spaces": true,
   "eos_token": "<|eot_id|>",
