@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from schemas.schemas import RelevanceRequest, FactualityRequest, ReadabilityRequest, LossRequest
 from utils.relevance import (
     compute_relevance,
@@ -27,6 +28,15 @@ from utils.readability import (
 )
 
 app = FastAPI(title="Text Metrics API", version="0.1.0")
+origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # =========================
 # TARGETS (defaults)
