@@ -1,5 +1,4 @@
 from pydantic import BaseModel
-from typing import List
 
 class SummaryRequest(BaseModel):
-    texts_original: str
+    text: str  # texto de entrada a resumir

@@ -234,6 +234,53 @@ def _sigmoid_centered_err(x, center, b):
     s = 1.0 / (1.0 + np.exp(-(x - float(center)) / float(b)))
     return 2.0 * np.abs(s - 0.5)  # [0,1]
 
+
+##########################################################################
+# =========================
+# LOSS (con sigmoide calibrada por σ)
+# =========================
+# import numpy as np
+
+# # Medias (centros) y desviaciones estándar estimadas para cada métrica
+# # Usa tus valores reales (p.ej., calculados en la calibración del dataset)
+# MU_FKGL = TARGET_FKGL
+# MU_SMOG = TARGET_SMOG
+# MU_DALE = TARGET_DALECHALL
+
+# SIGMA_FKGL = 1.8     # <-- reemplaza con tu σ estimada
+# SIGMA_SMOG = 2.4     # <-- reemplaza con tu σ estimada
+# SIGMA_DALE = 1.3     # <-- reemplaza con tu σ estimada
+
+# # Qué tan “agresiva” la pendiente: valor deseado de la sigmoide en μ+σ
+# # 0.90 => k≈2.20/σ ; 0.95 => k≈2.94/σ (penaliza más rápido)
+# Y_AT_1SIGMA = 0.95
+
+# def _k_from_sigma(sigma: float, y_at_1sigma: float = Y_AT_1SIGMA) -> float:
+#     return float(np.log(y_at_1sigma / (1.0 - y_at_1sigma)) / sigma)
+
+# def _sigmoid_centered_err(x, mu, sigma, y_at_1sigma: float = Y_AT_1SIGMA):
+#     """
+#     Sigmoide centrada en mu con pendiente k derivada de σ:
+#       S(x) = 1 / (1 + exp(-k*(x-mu)))  con  S(mu+σ) = y_at_1sigma
+#     Error en [0,1]: 2*|S - 0.5|
+#     """
+#     x = np.asarray(x, dtype=np.float32)
+#     k = _k_from_sigma(float(sigma), y_at_1sigma)
+#     s = 1.0 / (1.0 + np.exp(-k * (x - float(mu))))
+#     return 2.0 * np.abs(s - 0.5)  # [0,1]
+
+# # --- dentro de tu handler /loss, reemplaza las 3 líneas de legibilidad:
+# e_fkgl = _sigmoid_centered_err(fkgl, MU_FKGL, SIGMA_FKGL, Y_AT_1SIGMA)
+# e_smog = _sigmoid_centered_err(smog, MU_SMOG, SIGMA_SMOG, Y_AT_1SIGMA)
+# e_dale = _sigmoid_centered_err(dale, MU_DALE, SIGMA_DALE, Y_AT_1SIGMA)
+
+# # (Deja relevance/factuality con L2 contra sus targets como ya lo tienes,
+# # a menos que también quieras pasarlos por una sigmoide calibrada.)
+
+##########################################################################
+
+
+
 @app.post("/loss")
 async def loss(req: LossRequest):
     n = len(req.texts_generated)
