@@ -101,4 +101,3 @@ def generate_summary(req: SummaryRequest):
     cut = inputs["input_ids"].shape[1]
     summary = tokenizer.decode(gen[0, cut:], skip_special_tokens=True).strip()
     return {"summary": summary}
-
