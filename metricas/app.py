@@ -258,7 +258,7 @@ def _k_from_sigma(sigma: float, y_at_1sigma: float = Y_AT_1SIGMA) -> float:
     sigma = float(sigma)
     if sigma <= 0:
         return 0.0  # evita división por cero; tratará como escalón plano
-    return float(np.log(y_at_1sigma / (1.0 - y_at_1sigma)) / sigma)
+    return 10/sigma#float(np.log(y_at_1sigma / (1.0 - y_at_1sigma)) / sigma)
 
 def _sigmoid_centered_err(x, mu, sigma, y_at_1sigma: float = Y_AT_1SIGMA):
     """
