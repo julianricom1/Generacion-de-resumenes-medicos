@@ -4,10 +4,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-# instalar AlignScore desde GitHub
+# instalar AlignScore desde GitHub y AWS CLI para descargar modelos
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git build-essential curl && \
-    rm -rf /var/lib/apt/lists/*
+    git build-essential curl unzip && \
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip awscliv2.zip && \
+    ./aws/install && \
+    rm -rf awscliv2.zip aws /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -30,5 +33,9 @@ ENV ALIGNSCORE_MODEL=roberta-base \
 # Path donde montar el .ckpt
 RUN mkdir -p /models
 
+# Copy entrypoint script
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 EXPOSE 8008
-CMD ["bash", "-lc", "uvicorn app:app --host 0.0.0.0 --port ${PORT}"]
+ENTRYPOINT ["/app/entrypoint.sh"]
