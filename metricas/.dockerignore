@@ -6,9 +6,8 @@ ENV/
 **/__pycache__/
 *.pyc
 
-# pesos y caches
-models/
-*.ckpt
+# pesos y caches (NO excluir models/ porque contiene AlignScore-base.ckpt necesario)
+# Excluir solo archivos específicos de otros tipos
 *.pt
 *.pth
 *.bin

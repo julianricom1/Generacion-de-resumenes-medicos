@@ -1,22 +1,15 @@
 #!/bin/bash
 set -e
 
-# Download model checkpoint from S3 if not already present
-MODEL_BUCKET="${MODEL_BUCKET:-maia-align-score-model}"
-MODEL_KEY="${MODEL_KEY:-AlignScore-base.ckpt}"
-MODEL_PATH="/models/${MODEL_KEY}"
+# Verificar que el modelo existe (debe estar incluido en la imagen)
+MODEL_PATH="/models/AlignScore-base.ckpt"
 
 if [ ! -f "$MODEL_PATH" ]; then
-    echo "Downloading model from s3://${MODEL_BUCKET}/${MODEL_KEY}..."
-    if aws s3 cp "s3://${MODEL_BUCKET}/${MODEL_KEY}" "$MODEL_PATH" 2>&1; then
-        echo "Model downloaded successfully to ${MODEL_PATH}"
-    else
-        echo "WARNING: Failed to download model from S3. This may be due to missing IAM permissions."
-        echo "The model file should be included in the Docker image or permissions added to LabRole."
-        echo "Continuing startup - the service may fail if the model is required..."
-    fi
+    echo "ERROR: Model file not found at ${MODEL_PATH}"
+    echo "The model should be included in the Docker image."
+    exit 1
 else
-    echo "Model already exists at ${MODEL_PATH}, skipping download"
+    echo "Model found at ${MODEL_PATH} (included in image)"
 fi
 
 # Start the application

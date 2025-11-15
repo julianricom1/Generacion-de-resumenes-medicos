@@ -189,7 +189,7 @@ destroy-app:
 # =========================
 # Utilidades
 # =========================
-.PHONY: alb-dns purge-alb-enis
+.PHONY: alb-dns purge-alb-enis service-status
 alb-dns:
 	@set -e; \
 	if terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw alb_dns >/dev/null 2>&1; then \
@@ -199,6 +199,15 @@ alb-dns:
 	  DNS=$$(aws elbv2 describe-load-balancers --load-balancer-arns $$ALB_ARN --query 'LoadBalancers[0].DNSName' --output text); \
 	fi; \
 	printf "\nALB URL: http://%s/\n\n" "$$DNS"
+
+service-status:
+	@echo ">> Estado del servicio ECS..."
+	@aws ecs describe-services \
+	  --cluster metricas-cluster \
+	  --services metricas-svc \
+	  --region $(REGION) \
+	  --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Events:events[0:3]}' \
+	  --output json | jq '.' || echo "Error al obtener el estado del servicio"
 
 purge-alb-enis:
 	@echo ">> Buscando ENIs ligados al SG del ALB..."
@@ -229,7 +238,7 @@ purge-alb-enis:
 # =========================
 # Shortcuts Principales
 # =========================
-.PHONY: startall destroyall
+.PHONY: startall destroyall redeploy-metrics
 startall:
 	$(MAKE) deploy-infra
 	$(MAKE) build-image
@@ -245,3 +254,16 @@ destroyall:
 	$(MAKE) vpc-destroy
 	$(MAKE) registry-destroy
 	$(MAKE) tf-backend-bucket-delete
+
+redeploy-metrics:
+	@echo ">> Reconstruyendo imagen Docker..."
+	$(MAKE) build-image
+	@echo ">> Haciendo login a ECR..."
+	$(MAKE) ecr-login
+	@echo ">> Subiendo imagen a ECR..."
+	$(MAKE) push-image
+	@echo ">> Forzando actualización del servicio ECS..."
+	@aws ecs update-service --cluster metricas-cluster --service metricas-svc --force-new-deployment --region $(REGION) --output json | jq -r '.service | "Deployment iniciado: \(.deployments[0].id)\nEstado: \(.deployments[0].rolloutState)\nTask Definition: \(.taskDefinition)"' || \
+	  aws ecs update-service --cluster metricas-cluster --service metricas-svc --force-new-deployment --region $(REGION) --output text --query 'service.serviceName' | xargs -I {} echo "Deployment iniciado para servicio: {}"
+	@echo ">> Redeploy iniciado. El servicio se actualizará en unos minutos."
+	@echo ">> Verifica el estado con: make service-status"
