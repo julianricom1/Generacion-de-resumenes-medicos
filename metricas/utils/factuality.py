@@ -3,11 +3,21 @@ import os
 from typing import List
 import torch
 
+# Optimizaciones de PyTorch para CPU
+# Detectar número de vCPU automáticamente
+import multiprocessing
+NUM_CPUS = int(os.getenv("TORCH_NUM_THREADS", str(multiprocessing.cpu_count())))
+torch.set_num_threads(NUM_CPUS)  # Usar todos los vCPU disponibles
+torch.set_num_interop_threads(max(2, NUM_CPUS // 2))  # Threads para operaciones inter-operator
+# Habilitar optimizaciones de inferencia
+torch.backends.cudnn.enabled = False  # No necesario en CPU pero evita warnings
+torch.set_grad_enabled(False)  # Deshabilitar gradientes para inferencia (más rápido)
+
 # Importa la clase tal cual está en tu paquete AlignScore instalado
 from alignscore.alignscore import AlignScore as AlignScorer  
 
 # Config por env (opcional)
-ALIGNSCORE_MODEL = os.getenv("ALIGNSCORE_MODEL", "roberta-large")
+ALIGNSCORE_MODEL = os.getenv("ALIGNSCORE_MODEL", "roberta-base")
 ALIGNSCORE_CKPT = os.getenv("ALIGNSCORE_CKPT",os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models", "AlignScore-base.ckpt")))
 ALIGNSCORE_BATCH = int(os.getenv("ALIGNSCORE_BATCH", "8"))
 ALIGNSCORE_EVAL_MODE = os.getenv("ALIGNSCORE_EVAL_MODE", "nli_sp")
@@ -19,14 +29,16 @@ _scorer = None
 def _get_scorer():
     global _scorer
     if _scorer is None:
-        _scorer = AlignScorer(
-            model=ALIGNSCORE_MODEL,
-            batch_size=ALIGNSCORE_BATCH,
-            device=DEVICE,
-            ckpt_path=ALIGNSCORE_CKPT,
-            evaluation_mode=ALIGNSCORE_EVAL_MODE,
-            verbose=False,
-        )
+        # Deshabilitar gradientes para inferencia más rápida
+        with torch.no_grad():
+            _scorer = AlignScorer(
+                model=ALIGNSCORE_MODEL,
+                batch_size=ALIGNSCORE_BATCH,
+                device=DEVICE,
+                ckpt_path=ALIGNSCORE_CKPT,
+                evaluation_mode=ALIGNSCORE_EVAL_MODE,
+                verbose=False,
+            )
     return _scorer
 
 def compute_factuality(texts_original: List[str], texts_generated: List[str]) -> List[float]:
@@ -50,10 +62,12 @@ def compute_factuality(texts_original: List[str], texts_generated: List[str]) ->
 
     try:
         # Evalúa sólo pares válidos y reubica resultados
-        out = scorer.score(
-            contexts=[ctx[i] for i in valid_idx],
-            claims=[hyp[i] for i in valid_idx]
-        )
+        # Usar no_grad para inferencia más rápida
+        with torch.no_grad():
+            out = scorer.score(
+                contexts=[ctx[i] for i in valid_idx],
+                claims=[hyp[i] for i in valid_idx]
+            )
         for j, i in enumerate(valid_idx):
             scores[i] = float(out[j])
     except Exception as e:

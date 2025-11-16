@@ -242,3 +242,9 @@ metricas/AlignScore/
 
 # Keep targets.json versioned
 !metricas/targets.json
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfplan
