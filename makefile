@@ -238,7 +238,7 @@ purge-alb-enis:
 # =========================
 # Shortcuts Principales
 # =========================
-.PHONY: startall destroyall redeploy-metrics
+.PHONY: startall destroyall redeploy-metrics stop-metrics restore-metrics
 startall:
 	$(MAKE) deploy-infra
 	$(MAKE) build-image
@@ -267,3 +267,17 @@ redeploy-metrics:
 	  aws ecs update-service --cluster metricas-cluster --service metricas-svc --force-new-deployment --region $(REGION) --output text --query 'service.serviceName' | xargs -I {} echo "Deployment iniciado para servicio: {}"
 	@echo ">> Redeploy iniciado. El servicio se actualizará en unos minutos."
 	@echo ">> Verifica el estado con: make service-status"
+
+stop-metrics:
+	@echo ">> Deteniendo servicio de métricas (preservando imagen en ECR)..."
+	$(MAKE) destroy-app
+	$(MAKE) purge-alb-enis
+	@echo ">> Servicio detenido. La imagen en ECR se mantiene intacta."
+	@echo ">> Para restaurar, ejecuta: make restore-metrics"
+
+restore-metrics:
+	@echo ">> Restaurando servicio de métricas desde imagen existente en ECR..."
+	@echo ">> Asumiendo que registry y VPC ya existen..."
+	$(MAKE) deploy-app
+	$(MAKE) alb-dns
+	@echo ">> Servicio restaurado. Verifica el estado con: make service-status"
