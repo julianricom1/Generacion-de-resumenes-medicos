@@ -1,15 +1,11 @@
 # app.py
-import os, json
+import os
 from pathlib import Path
-import torch
 from fastapi import FastAPI
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import PeftModel
+from llama_cpp import Llama
 from app.schemas.schemas import SummaryRequest
 
 app = FastAPI(title="Text Generation API", version="0.1.0")
-
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 SYSTEM_PROMPT = (
     "You simplify clinical trial protocol text into a plain-language summary for the general public. "
@@ -18,66 +14,54 @@ SYSTEM_PROMPT = (
 )
 USER_PREFIX = "Using the following clinical trial protocol text as input, create a plain language summary.\n\n"
 
-MODEL_DIR = os.getenv(
-    "MODEL_DIR",
-    "generacion/ollama/outputs/meta-llama__Llama-3.2-3B-Instruct-lora-fp16/final",
+# Path al modelo GGUF
+MODEL_PATH = os.getenv(
+    "MODEL_PATH",
+    "/models/llama-3.2-3b-instruct.gguf"
 )
 
+# Configuración de generación
+MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "512"))
+TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
+TOP_P = float(os.getenv("TOP_P", "0.9"))
+REPEAT_PENALTY = float(os.getenv("REPEAT_PENALTY", "1.015"))
 
-GEN_CFG = dict(
-    max_new_tokens=int(os.getenv("MAX_NEW_TOKENS", "512")),
-    do_sample=True,
-    temperature=float(os.getenv("TEMPERATURE", "0.2")),
-    top_p=0.9,
-    no_repeat_ngram_size=0,
-    repetition_penalty=1.015,
-)
+# Threads para CPU (optimización)
+N_THREADS = int(os.getenv("N_THREADS", "4"))
+N_CTX = int(os.getenv("N_CTX", "4096"))  # Context window
 
-def load_model_and_tokenizer(model_dir: str, device: str = DEVICE):
-    model_dir = str(Path(model_dir).resolve())
-    cfg_path = Path(model_dir) / "adapter_config.json"
-    if not cfg_path.exists():
-        raise FileNotFoundError(f"No existe {cfg_path}")
+def load_model(model_path: str):
+    """Carga el modelo GGUF usando llama-cpp-python"""
+    if not Path(model_path).exists():
+        raise FileNotFoundError(f"Modelo no encontrado en: {model_path}")
+    
+    print(f"Cargando modelo GGUF desde {model_path}...")
+    
+    # Cargar modelo con optimizaciones para CPU
+    model = Llama(
+        model_path=model_path,
+        n_ctx=N_CTX,
+        n_threads=N_THREADS,
+        n_gpu_layers=0,  # CPU only
+        verbose=False,
+        use_mmap=True,  # Memory mapping para modelos grandes
+        use_mlock=False,  # No bloquear memoria
+    )
+    
+    print("Modelo cargado exitosamente")
+    return model
 
-    adapter_cfg = json.loads(Path(cfg_path).read_text(encoding="utf-8"))
-    base = adapter_cfg.get("base_model_name_or_path")
-    if not base:
-        raise ValueError("adapter_config.json no contiene 'base_model_name_or_path'.")
-
-    tok = AutoTokenizer.from_pretrained(model_dir, use_fast=True, trust_remote_code=True)
-    if tok.pad_token is None:
-        tok.pad_token = tok.eos_token
-    tok.padding_side = "left"
-
-    base_model = AutoModelForCausalLM.from_pretrained(
-        base,
-        torch_dtype=torch.float16 if device.startswith("cuda") else torch.float32,
-        trust_remote_code=True,
-    ).to(device)
-
-    base_model.resize_token_embeddings(len(tok))
-    model = PeftModel.from_pretrained(base_model, model_dir)
-    model.eval()
-    model.config.pad_token_id = tok.pad_token_id
-
-    eos_id = None
-    try:
-        eid = tok.convert_tokens_to_ids("<|sentence_end|>")
-        if eid is not None and eid != tok.unk_token_id:
-            eos_id = eid
-    except Exception:
-        pass
-
-    return model, tok, eos_id
-
-model, tokenizer, EOS_ID = load_model_and_tokenizer(MODEL_DIR, DEVICE)
+# Cargar modelo al iniciar
+llm = load_model(MODEL_PATH)
 
 def build_prompt(src: str) -> str:
-    return tokenizer.apply_chat_template(
-        [{"role": "system", "content": SYSTEM_PROMPT},
-         {"role": "user",   "content": USER_PREFIX + str(src)}],
-        tokenize=False, add_generation_prompt=True
-    )
+    """Construye el prompt usando el formato de chat de Llama 3.2"""
+    # Llama 3.2 format: <|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{system}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{user}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n
+    system_msg = f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{SYSTEM_PROMPT}<|eot_id|>"
+    user_msg = f"<|start_header_id|>user<|end_header_id|>\n\n{USER_PREFIX}{src}<|eot_id|>"
+    assistant_start = "<|start_header_id|>assistant<|end_header_id|>\n\n"
+    
+    return system_msg + user_msg + assistant_start
 
 #==========================================
 # ENDPOINTS
@@ -85,19 +69,34 @@ def build_prompt(src: str) -> str:
 
 @app.get("/healthz")
 def healthz():
-    return {"status": "ok", "device": DEVICE}
+    return {
+        "status": "ok", 
+        "device": "cpu", 
+        "model": Path(MODEL_PATH).name,
+        "threads": N_THREADS
+    }
 
 @app.post("/generate")
-@torch.no_grad()
 def generate_summary(req: SummaryRequest):
-    cfg = GEN_CFG.copy()
-    if EOS_ID is not None:
-        cfg["eos_token_id"] = EOS_ID
-    cfg["pad_token_id"] = tokenizer.pad_token_id
-
+    """Genera un resumen usando el modelo GGUF"""
     prompt = build_prompt(req.text)
-    inputs = tokenizer(prompt, return_tensors="pt", padding=True, truncation=True).to(DEVICE)
-    gen = model.generate(**inputs, **cfg)
-    cut = inputs["input_ids"].shape[1]
-    summary = tokenizer.decode(gen[0, cut:], skip_special_tokens=True).strip()
+    
+    # Generar con llama-cpp-python
+    response = llm(
+        prompt,
+        max_tokens=MAX_NEW_TOKENS,
+        temperature=TEMPERATURE,
+        top_p=TOP_P,
+        repeat_penalty=REPEAT_PENALTY,
+        stop=["<|eot_id|>", "<|end_of_text|>"],  # Stop tokens de Llama 3.2
+        echo=False,  # No incluir el prompt en la respuesta
+    )
+    
+    # Extraer el texto generado
+    if "choices" in response and len(response["choices"]) > 0:
+        summary = response["choices"][0]["text"].strip()
+    else:
+        # Fallback si la estructura es diferente
+        summary = str(response).strip()
+    
     return {"summary": summary}

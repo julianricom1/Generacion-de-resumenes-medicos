@@ -1,0 +1,33 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.venv
+venv
+.env
+.git
+.gitignore
+*.md
+*.txt
+!requirements.txt
+*.ipynb
+.pytest_cache
+.coverage
+htmlcov
+.DS_Store
+*.log
+# Excluir modelos que no sean GGUF
+models/*.ckpt
+models/*.bin
+models/*.safetensors
+models/*.pt
+models/*.pth
+# Pero incluir modelos GGUF
+!models/*.gguf
+
