@@ -37,8 +37,6 @@ data "terraform_remote_state" "alb" {
 
 locals {
   account_id   = data.aws_caller_identity.current.account_id
-  labrole_arn  = "arn:aws:iam::${local.account_id}:role/LabRole"
-
   front_image  = "${local.account_id}.dkr.ecr.${var.region}.amazonaws.com/clasificador-front:latest"
   front_port   = 80
 }
@@ -107,7 +105,6 @@ module "front" {
   subnet_ids        = data.terraform_remote_state.vpc.outputs.private_subnets
   alb_sg_id         = data.terraform_remote_state.alb.outputs.alb_sg_id
   cluster_arn       = data.terraform_remote_state.ecs.outputs.cluster_arn
-  execution_role_arn = local.labrole_arn
   log_group_name    = "/ecs/clasificador-logs"
 
   container_image   = local.front_image

@@ -22,12 +22,12 @@ venv
 htmlcov
 .DS_Store
 *.log
-# Excluir modelos que no sean GGUF
-models/*.ckpt
-models/*.bin
-models/*.safetensors
-models/*.pt
-models/*.pth
-# Pero incluir modelos GGUF
-!models/*.gguf
+# Excluir modelos (se descargan de S3 al iniciar)
+models/
+# Excluir directorios temporales de merge
+generacion/
+# Excluir scripts de merge (no se usan en el contenedor)
+merge_lora.py
+merge_and_upload_to_s3.ipynb
+upload_base_model_to_s3.py
 

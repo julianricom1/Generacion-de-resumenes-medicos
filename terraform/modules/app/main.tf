@@ -1,29 +1,9 @@
 data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
 
-# Note: IAM policy for S3 model access cannot be created via Terraform
-# because LabRole is managed externally. The following permissions must be
-# added manually to LabRole:
-# 
-# {
-#   "Version": "2012-10-17",
-#   "Statement": [
-#     {
-#       "Effect": "Allow",
-#       "Action": ["s3:GetObject"],
-#       "Resource": "arn:aws:s3:::maia-align-score-model/*"
-#     },
-#     {
-#       "Effect": "Allow",
-#       "Action": ["s3:ListBucket"],
-#       "Resource": "arn:aws:s3:::maia-align-score-model"
-#     }
-#   ]
-# }
-
-# Create CloudWatch log group for the service
-resource "aws_cloudwatch_log_group" "app" {
-  name              = var.log_group_name
-  retention_in_days = 14
+# Get execution role ARN - use provided value or try to get LabRole
+locals {
+  execution_role_arn = var.execution_role_arn != null ? var.execution_role_arn : "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/LabRole"
 }
 
 resource "aws_security_group" "app" {
@@ -45,14 +25,19 @@ resource "aws_security_group" "app" {
   }
 }
 
+resource "aws_cloudwatch_log_group" "app" {
+  name              = "/ecs/${var.name}"
+  retention_in_days = 7
+}
+
 resource "aws_ecs_task_definition" "this" {
   family                   = "${var.name}-task"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                      = var.task_cpu
   memory                   = var.task_memory
-  execution_role_arn       = var.execution_role_arn
-  task_role_arn            = var.execution_role_arn
+  execution_role_arn       = local.execution_role_arn
+  task_role_arn            = local.execution_role_arn
 
   container_definitions = jsonencode([
     {
@@ -64,9 +49,9 @@ resource "aws_ecs_task_definition" "this" {
       logConfiguration = {
         logDriver = "awslogs"
         options = {
-          awslogs-group         = var.log_group_name
-          awslogs-region        = data.aws_region.current.id
-          awslogs-stream-prefix = "api"
+          "awslogs-group"         = aws_cloudwatch_log_group.app.name
+          "awslogs-region"        = data.aws_region.current.name
+          "awslogs-stream-prefix" = "ecs"
         }
       }
     }

@@ -1,102 +1,157 @@
-# app.py
 import os
+import sys
+import multiprocessing
 from pathlib import Path
+from typing import Optional
+
+import torch
 from fastapi import FastAPI
-from llama_cpp import Llama
-from app.schemas.schemas import SummaryRequest
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from peft import PeftModel
 
-app = FastAPI(title="Text Generation API", version="0.1.0")
+# Optimizaciones de PyTorch para CPU
+# Usar todos los cores disponibles
+num_threads = int(os.getenv("TORCH_NUM_THREADS", multiprocessing.cpu_count()))
+torch.set_num_threads(num_threads)
+torch.set_num_interop_threads(num_threads)
+# Deshabilitar cuDNN (no se usa en CPU)
+torch.backends.cudnn.enabled = False
 
-SYSTEM_PROMPT = (
-    "You simplify clinical trial protocol text into a plain-language summary for the general public. "
-    "Keep to 6–8th grade readability, avoid diagnoses and speculation, no hallucinations, "
-    "and preserve key facts (objective, population, interventions, outcomes, timelines, safety)."
-)
-USER_PREFIX = "Using the following clinical trial protocol text as input, create a plain language summary.\n\n"
+# Asegurar que el path local esté en sys.path para imports relativos
+sys.path.insert(0, str(Path(__file__).parent))
 
-# Path al modelo GGUF
-MODEL_PATH = os.getenv(
-    "MODEL_PATH",
-    "/models/llama-3.2-3b-instruct.gguf"
-)
+from schemas.schemas import SummaryRequest
 
-# Configuración de generación
+app = FastAPI(title="Generación de Resúmenes Médicos")
+
+# Subaplicación con prefijo /generador para el ALB
+from fastapi import APIRouter
+router = APIRouter(prefix="/generador", tags=["generador"])
+
+# Variables de entorno
+MODEL_PATH = os.getenv("MODEL_PATH", "/models")
+MODEL_NAME = os.getenv("MODEL_NAME", "")
+DEVICE = os.getenv("DEVICE", "cpu")
 MAX_NEW_TOKENS = int(os.getenv("MAX_NEW_TOKENS", "512"))
 TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
-TOP_P = float(os.getenv("TOP_P", "0.9"))
+TOP_P = float(os.getenv("TOP_P", "0.95"))
 REPEAT_PENALTY = float(os.getenv("REPEAT_PENALTY", "1.015"))
 
-# Threads para CPU (optimización)
-N_THREADS = int(os.getenv("N_THREADS", "4"))
-N_CTX = int(os.getenv("N_CTX", "4096"))  # Context window
+# Variables globales para el modelo y tokenizer
+model = None
+tokenizer = None
 
-def load_model(model_path: str):
-    """Carga el modelo GGUF usando llama-cpp-python"""
-    if not Path(model_path).exists():
-        raise FileNotFoundError(f"Modelo no encontrado en: {model_path}")
+def find_model_path():
+    """Encuentra la ruta del modelo mergeado"""
+    if MODEL_NAME:
+        model_path = Path(MODEL_PATH) / MODEL_NAME
+        if model_path.exists():
+            return str(model_path)
     
-    print(f"Cargando modelo GGUF desde {model_path}...")
+    # Si no se especifica MODEL_NAME, buscar el primer subdirectorio en MODEL_PATH
+    model_base = Path(MODEL_PATH)
+    if model_base.exists():
+        subdirs = [d for d in model_base.iterdir() if d.is_dir()]
+        if subdirs:
+            return str(subdirs[0])
     
-    # Cargar modelo con optimizaciones para CPU
-    model = Llama(
-        model_path=model_path,
-        n_ctx=N_CTX,
-        n_threads=N_THREADS,
-        n_gpu_layers=0,  # CPU only
-        verbose=False,
-        use_mmap=True,  # Memory mapping para modelos grandes
-        use_mlock=False,  # No bloquear memoria
+    raise FileNotFoundError(f"No se encontró el modelo en {MODEL_PATH}")
+
+def load_model_and_tokenizer():
+    """Carga el modelo mergeado y el tokenizer"""
+    global model, tokenizer
+    
+    model_path = find_model_path()
+    print(f"Cargando modelo desde: {model_path}")
+    
+    # Cargar tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    
+    # Cargar modelo base
+    base_model = AutoModelForCausalLM.from_pretrained(
+        model_path,
+        torch_dtype=torch.float32,
+        device_map="cpu",
+        low_cpu_mem_usage=True
     )
     
-    print("Modelo cargado exitosamente")
-    return model
-
-# Cargar modelo al iniciar
-llm = load_model(MODEL_PATH)
-
-def build_prompt(src: str) -> str:
-    """Construye el prompt usando el formato de chat de Llama 3.2"""
-    # Llama 3.2 format: <|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{system}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{user}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n
-    system_msg = f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{SYSTEM_PROMPT}<|eot_id|>"
-    user_msg = f"<|start_header_id|>user<|end_header_id|>\n\n{USER_PREFIX}{src}<|eot_id|>"
-    assistant_start = "<|start_header_id|>assistant<|end_header_id|>\n\n"
+    # El modelo ya está mergeado, así que no necesitamos aplicar LoRA
+    model = base_model
+    model.eval()
     
-    return system_msg + user_msg + assistant_start
+    print(f"Modelo cargado exitosamente en {DEVICE}")
+    return model, tokenizer
 
-#==========================================
-# ENDPOINTS
-#==========================================
+def build_prompt(text: str) -> str:
+    """Construye el prompt para el modelo"""
+    messages = [
+        {"role": "system", "content": "Eres un asistente médico especializado en generar resúmenes concisos y precisos de textos médicos."},
+        {"role": "user", "content": f"Resume el siguiente texto médico de manera concisa y precisa:\n\n{text}"}
+    ]
+    return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
 
-@app.get("/healthz")
-def healthz():
+@app.on_event("startup")
+async def startup_event():
+    """Carga el modelo al iniciar la aplicación"""
+    global model, tokenizer
+    try:
+        model, tokenizer = load_model_and_tokenizer()
+    except Exception as e:
+        print(f"ERROR al cargar el modelo: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+@router.get("/healthz")
+async def healthz():
+    """Health check endpoint"""
+    try:
+        model_path = find_model_path()
+    except:
+        model_path = str(Path(MODEL_PATH) / MODEL_NAME) if MODEL_NAME else str(Path(MODEL_PATH))
     return {
-        "status": "ok", 
-        "device": "cpu", 
-        "model": Path(MODEL_PATH).name,
-        "threads": N_THREADS
+        "status": "healthy" if model is not None else "unhealthy",
+        "device": DEVICE,
+        "model_path": model_path,
+        "model_loaded": model is not None
     }
 
-@app.post("/generate")
-def generate_summary(req: SummaryRequest):
-    """Genera un resumen usando el modelo GGUF"""
-    prompt = build_prompt(req.text)
+@router.post("/generate")
+async def generate(request: SummaryRequest):
+    """Genera un resumen del texto de entrada"""
+    if model is None or tokenizer is None:
+        raise RuntimeError("Modelo no cargado")
     
-    # Generar con llama-cpp-python
-    response = llm(
-        prompt,
-        max_tokens=MAX_NEW_TOKENS,
-        temperature=TEMPERATURE,
-        top_p=TOP_P,
-        repeat_penalty=REPEAT_PENALTY,
-        stop=["<|eot_id|>", "<|end_of_text|>"],  # Stop tokens de Llama 3.2
-        echo=False,  # No incluir el prompt en la respuesta
-    )
+    # Construir prompt
+    prompt = build_prompt(request.text)
     
-    # Extraer el texto generado
-    if "choices" in response and len(response["choices"]) > 0:
-        summary = response["choices"][0]["text"].strip()
-    else:
-        # Fallback si la estructura es diferente
-        summary = str(response).strip()
+    # Tokenizar
+    inputs = tokenizer(prompt, return_tensors="pt").to(DEVICE)
     
-    return {"summary": summary}
+    # Generar con optimizaciones
+    # Usar inference_mode (más rápido que no_grad)
+    with torch.inference_mode():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=MAX_NEW_TOKENS,
+            temperature=TEMPERATURE,
+            top_p=TOP_P,
+            repetition_penalty=REPEAT_PENALTY,
+            do_sample=True,
+            pad_token_id=tokenizer.eos_token_id
+        )
+    
+    # Decodificar
+    generated_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    
+    # Extraer solo la respuesta generada (sin el prompt)
+    if "assistant" in generated_text.lower():
+        parts = generated_text.split("assistant", 1)
+        if len(parts) > 1:
+            generated_text = parts[-1].strip()
+    
+    return {"summary": generated_text}
+
+# Incluir el router en la app
+app.include_router(router)
+

@@ -22,14 +22,6 @@ variable "cluster_arn" {
   type = string
 }
 
-variable "execution_role_arn" {
-  type = string
-}
-
-variable "log_group_name" {
-  type = string
-}
-
 variable "container_image" {
   type = string
 }
@@ -61,4 +53,10 @@ variable "target_group_arn" {
 variable "env_vars" {
   type    = map(string)
   default = {}
+}
+
+variable "execution_role_arn" {
+  type        = string
+  description = "ARN of the ECS task execution role (required for Fargate)"
+  default     = null
 }

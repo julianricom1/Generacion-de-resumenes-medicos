@@ -43,7 +43,6 @@ data "terraform_remote_state" "alb" {
 
 locals {
   account_id      = data.aws_caller_identity.current.account_id
-  labrole_arn     = "arn:aws:iam::${local.account_id}:role/LabRole"
   # var.image debe venir como "repo:tag" (p.ej. "metricas-api:latest")
   container_image  = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.region}.amazonaws.com/metricas-api:latest"
   container_port   = var.container_port
@@ -58,8 +57,6 @@ module "app" {
   subnet_ids       = data.terraform_remote_state.vpc.outputs.private_subnets
   alb_sg_id        = data.terraform_remote_state.alb.outputs.alb_sg_id
   cluster_arn      = data.terraform_remote_state.ecs.outputs.cluster_arn
-  execution_role_arn = local.labrole_arn
-  log_group_name   = "/ecs/metricas-logs"
 
   container_image  = local.container_image
   container_port   = var.container_port
