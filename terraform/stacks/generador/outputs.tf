@@ -11,6 +11,6 @@ output "app_sg_id" {
 }
 
 output "target_group_arn" {
-  value = aws_lb_target_group.generador.arn
+  value = data.terraform_remote_state.alb.outputs.nlb_generador_target_group_arn
 }
 

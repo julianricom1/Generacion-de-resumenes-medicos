@@ -55,7 +55,7 @@ module "app" {
   region           = var.region          
   vpc_id           = data.terraform_remote_state.vpc.outputs.vpc_id
   subnet_ids       = data.terraform_remote_state.vpc.outputs.private_subnets
-  alb_sg_id        = data.terraform_remote_state.alb.outputs.alb_sg_id
+  alb_sg_id        = ""  # NLB no usa security groups
   cluster_arn      = data.terraform_remote_state.ecs.outputs.cluster_arn
 
   container_image  = local.container_image
@@ -63,7 +63,7 @@ module "app" {
   task_cpu         = var.cpu
   task_memory      = var.memory
   desired_count    = var.desired_count
-  target_group_arn = data.terraform_remote_state.alb.outputs.target_group_arn
+  target_group_arn = data.terraform_remote_state.alb.outputs.nlb_metricas_target_group_arn
   env_vars         = var.env_vars
 }
 

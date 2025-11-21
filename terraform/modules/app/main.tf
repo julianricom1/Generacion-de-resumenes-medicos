@@ -11,10 +11,13 @@ resource "aws_security_group" "app" {
   vpc_id = var.vpc_id
 
   ingress {
-    from_port       = var.container_port
-    to_port         = var.container_port
-    protocol        = "tcp"
-    security_groups = [var.alb_sg_id]
+    from_port   = var.container_port
+    to_port      = var.container_port
+    protocol     = "tcp"
+    # Si alb_sg_id está vacío (NLB), permitir desde cualquier lugar
+    # Si tiene valor (ALB), usar security groups
+    cidr_blocks      = var.alb_sg_id == "" ? ["0.0.0.0/0"] : []
+    security_groups  = var.alb_sg_id != "" ? [var.alb_sg_id] : []
   }
 
   egress {

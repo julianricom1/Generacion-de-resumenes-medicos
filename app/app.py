@@ -24,10 +24,6 @@ from schemas.schemas import SummaryRequest
 
 app = FastAPI(title="Generación de Resúmenes Médicos")
 
-# Subaplicación con prefijo /generador para el ALB
-from fastapi import APIRouter
-router = APIRouter(prefix="/generador", tags=["generador"])
-
 # Variables de entorno
 MODEL_PATH = os.getenv("MODEL_PATH", "/models")
 MODEL_NAME = os.getenv("MODEL_NAME", "")
@@ -68,6 +64,7 @@ def load_model_and_tokenizer():
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     
     # Cargar modelo base
+    print("Cargando modelo base (esto puede tardar varios minutos)...")
     base_model = AutoModelForCausalLM.from_pretrained(
         model_path,
         torch_dtype=torch.float32,
@@ -78,6 +75,17 @@ def load_model_and_tokenizer():
     # El modelo ya está mergeado, así que no necesitamos aplicar LoRA
     model = base_model
     model.eval()
+    
+    # Aplicar cuantización INT8 dinámica para acelerar la inferencia
+    print("Aplicando cuantización INT8 dinámica...")
+    from torch.quantization import quantize_dynamic
+    # Cuantizar solo las capas lineales (más efectivo)
+    model = quantize_dynamic(
+        model,
+        {torch.nn.Linear},  # Solo cuantizar capas lineales
+        dtype=torch.qint8
+    )
+    print("Cuantización INT8 aplicada exitosamente")
     
     print(f"Modelo cargado exitosamente en {DEVICE}")
     return model, tokenizer
@@ -102,7 +110,7 @@ async def startup_event():
         traceback.print_exc()
         raise
 
-@router.get("/healthz")
+@app.get("/healthz")
 async def healthz():
     """Health check endpoint"""
     try:
@@ -116,7 +124,7 @@ async def healthz():
         "model_loaded": model is not None
     }
 
-@router.post("/generate")
+@app.post("/generate")
 async def generate(request: SummaryRequest):
     """Genera un resumen del texto de entrada"""
     if model is None or tokenizer is None:
@@ -151,7 +159,4 @@ async def generate(request: SummaryRequest):
             generated_text = parts[-1].strip()
     
     return {"summary": generated_text}
-
-# Incluir el router en la app
-app.include_router(router)
 

@@ -126,7 +126,7 @@ build-generador-image:
 	docker build --rm --platform linux/amd64 --no-cache \
 	  --build-arg MODEL_NAME=$(MODEL_NAME) \
 	  -f app/Dockerfile \
-	  -t app-api:latest \
+	  -t generador-api:latest \
 	  ./app
 
 ecr-login:
@@ -137,8 +137,8 @@ push-metricas-image:
 	docker push "$(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/metricas-api:latest"
 
 push-generador-image:
-	docker tag "app-api:latest" "$(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/app-api:latest"
-	docker push "$(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/app-api:latest"
+	docker tag "generador-api:latest" "$(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/generador-api:latest"
+	docker push "$(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/generador-api:latest"
 
 
 
@@ -191,28 +191,25 @@ alb-plan:
 	$(MAKE) tfplan STACK=alb TERRAFORM_ENV=$(TERRAFORM_ENV)
 alb-apply:
 	@if [ ! -d "terraform/stacks/alb/.terraform" ]; then $(MAKE) alb-init; fi
-	@echo ">> Verificando si el target group ya existe..."
-	@TG_ARN=$$(aws elbv2 describe-target-groups --names metricas-alb-tg --region $(REGION) --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo ""); \
-	if [ -n "$$TG_ARN" ] && [ "$$TG_ARN" != "None" ] && [ "$$TG_ARN" != "null" ]; then \
-	  echo ">> Target group existe ($$TG_ARN)"; \
-	  TG_VPC=$$(aws elbv2 describe-target-groups --target-group-arns $$TG_ARN --region $(REGION) --query 'TargetGroups[0].VpcId' --output text 2>/dev/null || echo ""); \
-	  EXPECTED_VPC=$$(terraform -chdir="terraform/stacks/vpc" output -raw vpc_id 2>/dev/null || echo ""); \
-	  if [ -n "$$EXPECTED_VPC" ] && [ "$$TG_VPC" != "$$EXPECTED_VPC" ] && [ -n "$$TG_VPC" ]; then \
-	    echo ">> WARNING: Target group está en VPC diferente ($$TG_VPC vs $$EXPECTED_VPC)"; \
-	    echo ">> Eliminando target group existente para recrearlo en la VPC correcta..."; \
-	    aws elbv2 delete-target-group --target-group-arn $$TG_ARN --region $(REGION) >/dev/null 2>&1 || true; \
-	    echo ">> Esperando a que el target group sea eliminado..."; \
-	    sleep 5; \
-	  else \
-	    echo ">> Target group está en la VPC correcta, verificando si ya está en Terraform..."; \
-	    if ! terraform -chdir="terraform/stacks/alb" state show module.alb.aws_lb_target_group.app >/dev/null 2>&1; then \
-	      echo ">> Importando target group a Terraform..."; \
-	      cd terraform/stacks/alb && \
-	      terraform import -var-file="../../environments/student/alb/terraform.tfvars" module.alb.aws_lb_target_group.app $$TG_ARN 2>&1 | grep -v "Warning:" || echo ">> Import completado (o ya estaba importado)"; \
-	      cd ../../..; \
-	    else \
-	      echo ">> Target group ya está en Terraform"; \
-	    fi; \
+	@echo ">> Verificando target groups existentes (NLB)..."; \
+	TG_GEN_ARN=$$(aws elbv2 describe-target-groups --names metricas-nlb-generador-tg --region $(REGION) --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null | grep -v "^None$$" || true); \
+	TG_MET_ARN=$$(aws elbv2 describe-target-groups --names metricas-nlb-metricas-tg --region $(REGION) --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null | grep -v "^None$$" || true); \
+	if [ -n "$$TG_GEN_ARN" ] && [ "$$TG_GEN_ARN" != "None" ]; then \
+	  echo ">> Target group 'metricas-nlb-generador-tg' encontrado: $$TG_GEN_ARN"; \
+	  if ! terraform -chdir="terraform/stacks/alb" state show module.nlb_generador.aws_lb_target_group.this >/dev/null 2>&1; then \
+	    echo ">> Importando target group generador a Terraform..."; \
+	    cd terraform/stacks/alb && \
+	    terraform import -var-file="../../environments/student/alb/terraform.tfvars" module.nlb_generador.aws_lb_target_group.this $$TG_GEN_ARN 2>&1 | grep -v "Warning:" || echo ">> Import completado (o ya estaba importado)"; \
+	    cd ../../..; \
+	  fi; \
+	fi; \
+	if [ -n "$$TG_MET_ARN" ] && [ "$$TG_MET_ARN" != "None" ]; then \
+	  echo ">> Target group 'metricas-nlb-metricas-tg' encontrado: $$TG_MET_ARN"; \
+	  if ! terraform -chdir="terraform/stacks/alb" state show module.nlb_metricas.aws_lb_target_group.this >/dev/null 2>&1; then \
+	    echo ">> Importando target group métricas a Terraform..."; \
+	    cd terraform/stacks/alb && \
+	    terraform import -var-file="../../environments/student/alb/terraform.tfvars" module.nlb_metricas.aws_lb_target_group.this $$TG_MET_ARN 2>&1 | grep -v "Warning:" || echo ">> Import completado (o ya estaba importado)"; \
+	    cd ../../..; \
 	  fi; \
 	fi
 	@if [ ! -f "alb.tfplan" ]; then $(MAKE) alb-plan; fi
@@ -331,21 +328,39 @@ destroy-generador:
 # =========================
 .PHONY: alb-dns purge-alb-enis metricas-status generador-status
 alb-dns:
-	@set -e; \
-	if terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw alb_dns >/dev/null 2>&1; then \
-	  DNS=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw alb_dns); \
+	@echo ">> Obteniendo DNS de los NLB..."
+	@if terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_generador_dns_name >/dev/null 2>&1; then \
+	  DNS_GEN=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_generador_dns_name 2>&1 | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r '); \
+	  DNS_MET=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_metricas_dns_name 2>&1 | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r '); \
+	  if [ -n "$$DNS_GEN" ] && [ "$$DNS_GEN" != "null" ]; then \
+	    echo ""; \
+	    echo "========================================="; \
+	    echo "  URLs de los servicios:"; \
+	    echo "========================================="; \
+	    echo "  Generador:  http://$$DNS_GEN:8000"; \
+	    echo "  Métricas:   http://$$DNS_MET:8001"; \
+	    echo ""; \
+	    echo "  Endpoints:"; \
+	    echo "  - Generador health: http://$$DNS_GEN:8000/healthz"; \
+	    echo "  - Generador generate: http://$$DNS_GEN:8000/generate"; \
+	    echo "  - Métricas health: http://$$DNS_MET:8001/healthz"; \
+	    echo "  - Métricas readability: http://$$DNS_MET:8001/metrics/readability"; \
+	    echo "  - Métricas relevance: http://$$DNS_MET:8001/metrics/relevance"; \
+	    echo "  - Métricas factuality: http://$$DNS_MET:8001/metrics/factuality"; \
+	    echo "  - Métricas loss: http://$$DNS_MET:8001/loss"; \
+	    echo "========================================="; \
+	    echo ""; \
+	  else \
+	    echo "   NLB aún no desplegado. Ejecuta: make alb-apply"; \
+	  fi; \
 	else \
-	  ALB_ARN=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw alb_arn); \
-	  DNS=$$(aws elbv2 describe-load-balancers --load-balancer-arns $$ALB_ARN --query 'LoadBalancers[0].DNSName' --output text); \
-	fi; \
-	printf "\nALB URL: http://%s/\n" "$$DNS"
-	printf "Métricas: http://%s/\n" "$$DNS"
-	printf "Generador: http://%s/generador/\n\n" "$$DNS"
+	  echo "   NLB aún no desplegado. Ejecuta: make alb-apply"; \
+	fi
 
 metricas-status:
 	@echo ">> Estado del servicio de métricas..."
 	@aws ecs describe-services \
-	  --cluster metricas-cluster \
+	  --cluster cluster_g3_MAIA \
 	  --services metricas-svc \
 	  --region $(REGION) \
 	  --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Events:events[0:3]}' \
@@ -354,42 +369,19 @@ metricas-status:
 generador-status:
 	@echo ">> Estado del servicio generador..."
 	@aws ecs describe-services \
-	  --cluster metricas-cluster \
+	  --cluster cluster_g3_MAIA \
 	  --services generador-svc \
 	  --region $(REGION) \
 	  --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Events:events[0:3]}' \
 	  --output json | jq '.' || echo "Error al obtener el estado del servicio"
 
 purge-alb-enis:
-	@echo ">> Buscando ENIs ligados al SG del ALB..."
-	@ALB_SG=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw alb_sg_id 2>&1 | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r ' || true)
-	if [ -z "$$ALB_SG" ] || [ "$$ALB_SG" = "null" ]; then echo "   No hay alb_sg_id en outputs (ALB ya destruido?)."; exit 0; fi; \
-	ENIS=$$(aws ec2 describe-network-interfaces --filters "Name=group-id,Values=$$ALB_SG" --query 'NetworkInterfaces[*].NetworkInterfaceId' --output text 2>/dev/null || true); \
-	if [ -n "$$ENIS" ]; then \
-	  echo "   ENIs encontradas: $$ENIS"; \
-	  for eni in $$ENIS; do \
-	    ATT=$$(aws ec2 describe-network-interfaces --network-interface-ids $$eni --query 'NetworkInterfaces[0].Attachment.AttachmentId' --output text 2>/dev/null || true); \
-	    if [ "$$ATT" != "None" ] && [ -n "$$ATT" ]; then \
-	      echo "   Detaching $$eni ($$ATT)..."; \
-	      aws ec2 detach-network-interface --attachment-id $$ATT || true; \
-	    fi; \
-	    echo "   Esperando a que $$eni quede 'available'..."; \
-	    for i in 1 2 3 4 5 6 7 8 9 10; do \
-	      S=$$(aws ec2 describe-network-interfaces --network-interface-ids $$eni --query 'NetworkInterfaces[0].Status' --output text 2>/dev/null || true); \
-	      if [ "$$S" = "available" ]; then break; fi; \
-	      sleep 3; \
-	    done; \
-	    echo "   Eliminando ENI $$eni..."; \
-	    aws ec2 delete-network-interface --network-interface-id $$eni || true; \
-	  done; \
-	else \
-	  echo "   No hay ENIs asociadas."; \
-	fi
+	@echo ">> NLB no usa security groups, no hay ENIs que limpiar."
 
 # =========================
 # Shortcuts Principales
 # =========================
-.PHONY: startall destroyall redeploy-metricas redeploy-generador stop-metricas stop-generador restore-metricas restore-generador
+.PHONY: startall destroyall redeploy-metricas redeploy-generador stop-metricas stop-generador restore-metricas restore-generador stopall restoreall
 startall:
 	@if [ -z "$(MODEL_NAME)" ]; then \
 	  echo "ERROR: MODEL_NAME no especificado. Ejemplo: make startall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas"; \
@@ -444,8 +436,8 @@ redeploy-metricas:
 	@echo ">> Subiendo imagen a ECR..."
 	$(MAKE) push-metricas-image
 	@echo ">> Forzando actualización del servicio ECS..."
-	@aws ecs update-service --cluster metricas-cluster --service metricas-svc --force-new-deployment --region $(REGION) --output json | jq -r '.service | "Deployment iniciado: \(.deployments[0].id)\nEstado: \(.deployments[0].rolloutState)\nTask Definition: \(.taskDefinition)"' || \
-	  aws ecs update-service --cluster metricas-cluster --service metricas-svc --force-new-deployment --region $(REGION) --output text --query 'service.serviceName' | xargs -I {} echo "Deployment iniciado para servicio: {}"
+	@aws ecs update-service --cluster cluster_g3_MAIA --service metricas-svc --force-new-deployment --region $(REGION) --output json | jq -r '.service | "Deployment iniciado: \(.deployments[0].id)\nEstado: \(.deployments[0].rolloutState)\nTask Definition: \(.taskDefinition)"' || \
+	  aws ecs update-service --cluster cluster_g3_MAIA --service metricas-svc --force-new-deployment --region $(REGION) --output text --query 'service.serviceName' | xargs -I {} echo "Deployment iniciado para servicio: {}"
 	@echo ">> Redeploy iniciado. El servicio se actualizará en unos minutos."
 	@echo ">> Verifica el estado con: make metricas-status"
 
@@ -461,8 +453,8 @@ redeploy-generador:
 	@echo ">> Subiendo imagen a ECR..."
 	$(MAKE) push-generador-image
 	@echo ">> Forzando actualización del servicio ECS..."
-	@aws ecs update-service --cluster metricas-cluster --service generador-svc --force-new-deployment --region $(REGION) --output json | jq -r '.service | "Deployment iniciado: \(.deployments[0].id)\nEstado: \(.deployments[0].rolloutState)\nTask Definition: \(.taskDefinition)"' || \
-	  aws ecs update-service --cluster metricas-cluster --service generador-svc --force-new-deployment --region $(REGION) --output text --query 'service.serviceName' | xargs -I {} echo "Deployment iniciado para servicio: {}"
+	@aws ecs update-service --cluster cluster_g3_MAIA --service generador-svc --force-new-deployment --region $(REGION) --output json | jq -r '.service | "Deployment iniciado: \(.deployments[0].id)\nEstado: \(.deployments[0].rolloutState)\nTask Definition: \(.taskDefinition)"' || \
+	  aws ecs update-service --cluster cluster_g3_MAIA --service generador-svc --force-new-deployment --region $(REGION) --output text --query 'service.serviceName' | xargs -I {} echo "Deployment iniciado para servicio: {}"
 	@echo ">> Redeploy iniciado. El servicio se actualizará en unos minutos."
 	@echo ">> Verifica el estado con: make generador-status"
 
@@ -481,7 +473,10 @@ stop-generador:
 restore-metricas:
 	@echo ">> Restaurando servicio de métricas desde imagen existente en ECR..."
 	@echo ">> Asumiendo que registry, VPC, ECS y ALB ya existen..."
-	$(MAKE) deploy-metricas
+	@echo ">> NO se reconstruirá ni se empujará la imagen (usando imagen existente en ECR)..."
+	$(MAKE) metricas-init
+	$(MAKE) metricas-plan
+	$(MAKE) metricas-apply
 	$(MAKE) alb-dns
 	@echo ">> Servicio restaurado. Verifica el estado con: make metricas-status"
 
@@ -492,6 +487,57 @@ restore-generador:
 	fi
 	@echo ">> Restaurando servicio generador desde imagen existente en ECR..."
 	@echo ">> Asumiendo que registry, VPC, ECS y ALB ya existen..."
-	$(MAKE) deploy-generador MODEL_NAME=$(MODEL_NAME)
+	@echo ">> NO se reconstruirá ni se empujará la imagen (usando imagen existente en ECR)..."
+	@sed -i 's/MODEL_NAME = ".*"/MODEL_NAME = "$(MODEL_NAME)"/' terraform/environments/student/generador/terraform.tfvars || \
+	  sed -i 's/MODEL_NAME = .*/MODEL_NAME = "$(MODEL_NAME)"/' terraform/environments/student/generador/terraform.tfvars
+	$(MAKE) generador-init
+	$(MAKE) generador-plan
+	$(MAKE) generador-apply
 	$(MAKE) alb-dns
 	@echo ">> Servicio restaurado. Verifica el estado con: make generador-status"
+
+stopall:
+	@echo ">> Deteniendo todos los servicios, load balancers y cluster ECS (preservando imágenes en ECR)..."
+	@echo ">> Deteniendo servicio de métricas..."
+	$(MAKE) destroy-metricas
+	@echo ">> Deteniendo servicio generador..."
+	$(MAKE) destroy-generador
+	@echo ">> Destruyendo load balancers (NLB)..."
+	$(MAKE) alb-destroy
+	@echo ">> Destruyendo cluster ECS..."
+	$(MAKE) ecs-destroy
+	@echo ">> Todos los servicios, load balancers y cluster ECS detenidos."
+	@echo ">> ECS está ahora vacío."
+	@echo ">> Las imágenes en ECR se mantienen intactas."
+	@echo ">> Para restaurar todo, ejecuta: make restoreall MODEL_NAME=..."
+
+restoreall:
+	@if [ -z "$(MODEL_NAME)" ]; then \
+	  echo "ERROR: MODEL_NAME no especificado. Ejemplo: make restoreall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas"; \
+	  exit 1; \
+	fi
+	@echo ">> Restaurando toda la infraestructura (cluster ECS + servicios + load balancers)..."
+	@echo ">> Asumiendo que registry y VPC ya existen..."
+	@echo ">> NO se reconstruirán ni se empujarán las imágenes (usando imágenes existentes en ECR)..."
+	@echo ">> Recreando cluster ECS..."
+	$(MAKE) ecs-init
+	$(MAKE) ecs-plan
+	$(MAKE) ecs-apply
+	@echo ">> Recreando load balancers (NLB)..."
+	$(MAKE) alb-init
+	$(MAKE) alb-plan
+	$(MAKE) alb-apply
+	@echo ">> Restaurando servicio de métricas..."
+	$(MAKE) metricas-init
+	$(MAKE) metricas-plan
+	$(MAKE) metricas-apply
+	@echo ">> Restaurando servicio generador..."
+	@sed -i 's/MODEL_NAME = ".*"/MODEL_NAME = "$(MODEL_NAME)"/' terraform/environments/student/generador/terraform.tfvars || \
+	  sed -i 's/MODEL_NAME = .*/MODEL_NAME = "$(MODEL_NAME)"/' terraform/environments/student/generador/terraform.tfvars
+	$(MAKE) generador-init
+	$(MAKE) generador-plan
+	$(MAKE) generador-apply
+	@echo ">> Mostrando URLs de los servicios..."
+	$(MAKE) alb-dns
+	@echo ">> Todos los servicios, load balancers y cluster ECS restaurados."
+	@echo ">> Verifica el estado con: make metricas-status y make generador-status"

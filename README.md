@@ -213,7 +213,7 @@ env_vars = {
 ### Utilidades
 
 ```bash
-# Obtener URLs del ALB
+# Obtener URLs del NLB
 make alb-dns
 
 # Ver estado del servicio de métricas
@@ -222,6 +222,55 @@ make metricas-status
 # Ver estado del servicio generador
 make generador-status
 ```
+
+### Endpoints de la API
+
+Una vez desplegados los servicios, puedes obtener las URLs usando `make alb-dns`. Los servicios están disponibles en puertos diferentes usando Network Load Balancers (NLB):
+
+**Servicio de Métricas** (puerto 8001):
+- Base URL: `http://{nlb-metricas-dns}:8001`
+- Health check: `GET http://{nlb-metricas-dns}:8001/healthz`
+- Relevancia: `POST http://{nlb-metricas-dns}:8001/metrics/relevance`
+  ```json
+  {
+    "texts_original": ["texto original 1", "texto original 2"],
+    "texts_generated": ["texto generado 1", "texto generado 2"]
+  }
+  ```
+- Factualidad: `POST http://{nlb-metricas-dns}:8001/metrics/factuality`
+  ```json
+  {
+    "texts_original": ["texto original 1", "texto original 2"],
+    "texts_generated": ["texto generado 1", "texto generado 2"]
+  }
+  ```
+- Legibilidad: `POST http://{nlb-metricas-dns}:8001/metrics/readability`
+  ```json
+  {
+    "texts": ["texto 1", "texto 2", "texto 3"]
+  }
+  ```
+- Loss combinado: `POST http://{nlb-metricas-dns}:8001/loss`
+  ```json
+  {
+    "texts_original": ["texto original 1"],
+    "texts_human": ["texto humano 1"],
+    "texts_generated": ["texto generado 1"],
+    "weights": [0.25, 0.25, 0.2, 0.15, 0.15]
+  }
+  ```
+
+**Servicio Generador** (puerto 8000):
+- Base URL: `http://{nlb-generador-dns}:8000`
+- Health check: `GET http://{nlb-generador-dns}:8000/healthz`
+- Generar resumen: `POST http://{nlb-generador-dns}:8000/generate`
+  ```json
+  {
+    "text": "Texto médico a resumir..."
+  }
+  ```
+
+**Nota:** Los NLB no tienen timeout de request (a diferencia del ALB que tiene 60 segundos), por lo que pueden manejar requests largas sin problemas.
 
 ### Proceso de merge y build del generador
 
@@ -276,9 +325,9 @@ El proceso del generador se divide en dos pasos:
 - El modelo mergeado debe estar previamente en S3 antes de hacer el deploy
 - Los servicios son independientes: puedes desplegar métricas o generador por separado
 - Cada servicio despliega su propia infraestructura (VPC, ECS, ALB) si no existe
-- Los servicios se despliegan en ECS Fargate con path-based routing en el ALB:
-  - Métricas: `http://{alb-dns}/`
-  - Generador: `http://{alb-dns}/generador/`
+- Los servicios se despliegan en ECS Fargate con Network Load Balancers (NLB):
+  - Métricas: `http://{nlb-metricas-dns}:8001`
+  - Generador: `http://{nlb-generador-dns}:8000`
 - **CloudWatch Logs no se usa**: los logs de los contenedores no se almacenan en CloudWatch
 - **Manejo automático de Terraform**: Los comandos de destroy (`destroy-metricas`, `destroy-generador`, `destroyall`, etc.) manejan automáticamente los problemas de lock file inconsistentes, ejecutando `init` cuando es necesario
 - **Bucket S3 del LoRA**: El bucket `modelo-generador-maia-g8` es permanente y no se modifica ni elimina por el proceso de deployment. Asegúrate de que el LoRA esté subido antes de ejecutar el build.

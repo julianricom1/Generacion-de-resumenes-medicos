@@ -2,10 +2,10 @@ region         = "us-east-1"
 backend_bucket = "infrastructura-maia-g8"
 
 service_name   = "generador"
-image          = "app-api:latest"
+image          = "generador-api:latest"
 container_port = 8000
-cpu            = 8192
-memory         = 32768
+cpu            = 16384
+memory         = 122880
 desired_count  = 1
 env_vars = { 
   PORT = "8000"
