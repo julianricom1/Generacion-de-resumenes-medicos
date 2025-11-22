@@ -1,0 +1,10 @@
+{
+  "analysis_timestamp": "2025-11-19 14:46:49",
+  "input_file": "./GENERATED_TEXTS/ollama__outputs__meta-llama__Llama-3.2-3B-Instruct-FKGD9_Sliding_Window__final_generations.csv",
+  "output_file": "./GENERATED_TEXTS/ollama__outputs__meta-llama__Llama-3.2-3B-Instruct-FKGD9_Sliding_Window__final_generations_classification.csv",
+  "total_rows_processed": 30,
+  "columns_analyzed": [
+    "gen_1",
+    "gen_2"
+  ],
+  "total_api_requests": 
