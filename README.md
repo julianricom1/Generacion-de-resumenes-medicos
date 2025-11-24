@@ -95,16 +95,16 @@ Los servicios son completamente independientes y pueden desplegarse por separado
 # Desplegar servicio de métricas (incluye toda la infraestructura necesaria)
 make deploy-metricas
 
-# Destruir servicio
+# Destruir servicio (elimina completamente)
 make destroy-metricas
 
-# Detener servicio (sin destruir)
+# Detener servicio (preserva imagen en ECR, elimina solo el servicio ECS)
 make stop-metricas
 
-# Restaurar servicio
+# Restaurar servicio (usa imagen existente en ECR, no reconstruye)
 make restore-metricas
 
-# Re-desplegar (reconstruir y actualizar)
+# Re-desplegar (reconstruir imagen y actualizar servicio)
 make redeploy-metricas
 ```
 
@@ -119,18 +119,32 @@ make redeploy-metricas
 # PASO 2: Desplegar servicio generador (después del merge)
 make deploy-generador MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
 
-# Destruir servicio
+# Destruir servicio (elimina completamente)
 make destroy-generador
 
-# Detener servicio (sin destruir)
+# Detener servicio (preserva imagen en ECR, elimina solo el servicio ECS)
 make stop-generador MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
 
-# Restaurar servicio
+# Restaurar servicio (usa imagen existente en ECR, no reconstruye)
 make restore-generador MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
 
-# Re-desplegar (reconstruir y actualizar)
+# Re-desplegar (reconstruir imagen y actualizar servicio)
 make redeploy-generador MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
 ```
+
+**Comandos para todos los servicios:**
+```bash
+# Detener todos los servicios, load balancers y cluster ECS (preserva imágenes en ECR)
+make stopall
+
+# Restaurar toda la infraestructura (cluster ECS + servicios + load balancers)
+make restoreall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
+```
+
+**Nota sobre stop vs destroy:**
+- `stop-*` / `stopall`: Elimina solo el servicio ECS (y load balancers/cluster en `stopall`), preserva las imágenes en ECR. Útil para ahorrar costos sin perder las imágenes Docker.
+- `destroy-*` / `destroyall`: Elimina completamente el servicio y todos sus recursos. Útil para limpiar completamente.
+- `restore-*` / `restoreall`: Restaura el servicio usando las imágenes existentes en ECR (no reconstruye las imágenes). Más rápido que `deploy-*`.
 
 **Nota importante sobre el generador:**
 
