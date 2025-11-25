@@ -113,21 +113,21 @@ build-metricas-image:
 build-generador-image:
 	@if [ -z "$(MODEL_NAME)" ]; then \
 	  echo "ERROR: MODEL_NAME no especificado. Ejemplo: make build-generador-image MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas"; \
-	  echo "       Primero ejecuta el notebook app/merge_and_upload_to_s3.ipynb para hacer merge y subir a S3"; \
+	  echo "       Primero ejecuta el notebook generator_app/merge_and_upload_to_s3.ipynb para hacer merge y subir a S3"; \
 	  exit 1; \
 	fi
 	@echo ">> Verificando que el modelo mergeado existe en S3..."
 	@aws s3 ls s3://modelo-generador-maia-g8/merged-models/$(MODEL_NAME)/config.json --region $(REGION) >/dev/null 2>&1 || { \
 	  echo "ERROR: El modelo mergeado no se encuentra en S3: s3://modelo-generador-maia-g8/merged-models/$(MODEL_NAME)/"; \
-	  echo "       Primero ejecuta el notebook app/merge_and_upload_to_s3.ipynb para hacer merge y subir a S3"; \
+	  echo "       Primero ejecuta el notebook generator_app/merge_and_upload_to_s3.ipynb para hacer merge y subir a S3"; \
 	  exit 1; \
 	}
 	@echo ">> Construyendo imagen Docker localmente..."
 	docker build --rm --platform linux/amd64 --no-cache \
 	  --build-arg MODEL_NAME=$(MODEL_NAME) \
-	  -f app/Dockerfile \
+	  -f generator_app/Dockerfile \
 	  -t generador-api:latest \
-	  ./app
+	  ./generator_app
 
 ecr-login:
 	aws ecr get-login-password --region $(REGION) | docker login --username AWS --password-stdin "$(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com"
@@ -289,7 +289,7 @@ deploy-metricas:
 deploy-generador:
 	@if [ -z "$(MODEL_NAME)" ]; then \
 	  echo "ERROR: MODEL_NAME no especificado. Ejemplo: make deploy-generador MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas"; \
-	  echo "       Primero ejecuta el notebook app/merge_and_upload_to_s3.ipynb para hacer merge y subir a S3"; \
+	  echo "       Primero ejecuta el notebook generator_app/merge_and_upload_to_s3.ipynb para hacer merge y subir a S3"; \
 	  exit 1; \
 	fi
 	@echo ">> Desplegando generador (infraestructura completa)..."
@@ -385,7 +385,7 @@ purge-alb-enis:
 startall:
 	@if [ -z "$(MODEL_NAME)" ]; then \
 	  echo "ERROR: MODEL_NAME no especificado. Ejemplo: make startall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas"; \
-	  echo "       Primero ejecuta el notebook app/merge_and_upload_to_s3.ipynb para hacer merge y subir a S3"; \
+	  echo "       Primero ejecuta el notebook generator_app/merge_and_upload_to_s3.ipynb para hacer merge y subir a S3"; \
 	  exit 1; \
 	fi
 	@echo ">> Desplegando infraestructura completa (métricas + generador)..."

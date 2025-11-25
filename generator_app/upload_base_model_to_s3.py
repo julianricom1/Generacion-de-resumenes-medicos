@@ -3,10 +3,10 @@
 Script para subir el modelo base a S3 para acelerar builds futuros.
 
 Uso:
-    python app/upload_base_model_to_s3.py <modelo_base> [bucket] [key_prefix]
+    python generator_app/upload_base_model_to_s3.py <modelo_base> [bucket] [key_prefix]
 
 Ejemplo:
-    python app/upload_base_model_to_s3.py meta-llama/Llama-3.2-3B-Instruct
+    python generator_app/upload_base_model_to_s3.py meta-llama/Llama-3.2-3B-Instruct
 
 El modelo se subirá a s3://modelo-generador-maia-g8/base-models/meta-llama--Llama-3.2-3B-Instruct/
 """

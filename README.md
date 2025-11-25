@@ -77,7 +77,7 @@ El proyecto incluye un Makefile con comandos para desplegar los servicios de mé
 #### Despliegue completo
 ```bash
 # PASO 1: Merge y subida a S3 (hacer una vez, localmente en Windows con Jupyter)
-# Abre y ejecuta el notebook: app/merge_and_upload_to_s3.ipynb
+# Abre y ejecuta el notebook: generator_app/merge_and_upload_to_s3.ipynb
 
 # PASO 2: Desplegar toda la infraestructura (métricas + generador)
 make startall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
@@ -111,7 +111,7 @@ make redeploy-metricas
 **Generador:**
 ```bash
 # PASO 1: Merge y subida a S3 (hacer una vez, localmente en Windows con Jupyter)
-# Abre y ejecuta el notebook: app/merge_and_upload_to_s3.ipynb
+# Abre y ejecuta el notebook: generator_app/merge_and_upload_to_s3.ipynb
 # Este notebook:
 #   - Hace el merge del LoRA con el modelo base
 #   - Sube el modelo mergeado a S3: s3://modelo-generador-maia-g8/merged-models/{MODEL_NAME}/
@@ -159,7 +159,7 @@ make restoreall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
    MODEL_S3_BUCKET = "modelo-generador-maia-g8"
    ```
 
-2. **Abre el notebook**: `app/merge_and_upload_to_s3.ipynb`
+2. **Abre el notebook**: `generator_app/merge_and_upload_to_s3.ipynb`
 
 3. **Ajusta los parámetros en el notebook:**
    - `LORA_PATH`: Ruta al directorio `final` del LoRA entrenado
@@ -292,7 +292,7 @@ El proceso del generador se divide en dos pasos:
 
 #### PASO 1: Merge y subida a S3 (local, una vez)
 
-1. **Abre el notebook Jupyter**: `app/merge_and_upload_to_s3.ipynb`
+1. **Abre el notebook Jupyter**: `generator_app/merge_and_upload_to_s3.ipynb`
 2. **Configura el notebook:**
    - Ajusta `LORA_PATH` si es necesario (ya viene con un ejemplo)
    - El `MODEL_NAME` se detecta automáticamente del `LORA_PATH`
@@ -329,7 +329,7 @@ El proceso del generador se divide en dos pasos:
 
 ### Notas importantes
 
-- **El merge se hace localmente** usando el notebook `app/merge_and_upload_to_s3.ipynb`
+- **El merge se hace localmente** usando el notebook `generator_app/merge_and_upload_to_s3.ipynb`
   - El notebook requiere el token de Hugging Face en `KEYS.py`
   - El `MODEL_NAME` se detecta automáticamente del `LORA_PATH` o puedes especificarlo manualmente
   - El modelo mergeado se sube a S3: `s3://modelo-generador-maia-g8/merged-models/{MODEL_NAME}/`

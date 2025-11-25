@@ -49,4 +49,6 @@ COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Dentro del contenedor, el código está en /app, así que el módulo se llama 'app'
+# Usar main:app si existe (versión con routers), sino app:app (versión simple)
+CMD ["sh", "-c", "if [ -f /app/main.py ]; then uvicorn main:app --host 0.0.0.0 --port 8000; else uvicorn app:app --host 0.0.0.0 --port 8000; fi"]

@@ -5,8 +5,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from loguru import logger
 
-from app.api import api_router
-from app.config import settings, setup_app_logging
+# Imports que funcionan tanto localmente (generator_app) como en Docker (/app)
+import sys
+from pathlib import Path
+
+# Ajustar imports según el contexto
+if Path(__file__).parent.name == "generator_app":
+    # Ejecutándose localmente
+    from generator_app.api import api_router
+    from generator_app.config import settings, setup_app_logging
+else:
+    # Ejecutándose en Docker (código en /app)
+    from app.api import api_router
+    from app.config import settings, setup_app_logging
 
 # setup logging as early as possible
 setup_app_logging(config=settings)
