@@ -17,10 +17,8 @@ torch.set_num_interop_threads(num_threads)
 # Deshabilitar cuDNN (no se usa en CPU)
 torch.backends.cudnn.enabled = False
 
-# Asegurar que el path local esté en sys.path para imports relativos
-sys.path.insert(0, str(Path(__file__).parent))
-
-from schemas.schemas import SummaryRequest
+# Import usando el módulo completo para consistencia
+from generator_app.schemas.schemas import SummaryRequest
 
 app = FastAPI(title="Generación de Resúmenes Médicos")
 
@@ -61,7 +59,9 @@ def load_model_and_tokenizer():
     print(f"Cargando modelo desde: {model_path}")
     
     # Cargar tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=True, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     
     # Cargar modelo base
     print("Cargando modelo base (esto puede tardar varios minutos)...")
@@ -69,7 +69,8 @@ def load_model_and_tokenizer():
         model_path,
         torch_dtype=torch.float32,
         device_map="cpu",
-        low_cpu_mem_usage=True
+        low_cpu_mem_usage=True,
+        trust_remote_code=True
     )
     
     # El modelo ya está mergeado, así que no necesitamos aplicar LoRA

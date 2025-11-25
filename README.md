@@ -228,7 +228,7 @@ env_vars = {
 
 ```bash
 # Obtener URLs del NLB
-make alb-dns
+make show_endpoints
 
 # Ver estado del servicio de métricas
 make metricas-status
@@ -239,7 +239,7 @@ make generador-status
 
 ### Endpoints de la API
 
-Una vez desplegados los servicios, puedes obtener las URLs usando `make alb-dns`. Los servicios están disponibles en puertos diferentes usando Network Load Balancers (NLB):
+Una vez desplegados los servicios, puedes obtener las URLs usando `make show_endpoints`. Los servicios están disponibles en puertos diferentes usando Network Load Balancers (NLB):
 
 **Servicio de Métricas** (puerto 8001):
 - Base URL: `http://{nlb-metricas-dns}:8001`
@@ -284,7 +284,7 @@ Una vez desplegados los servicios, puedes obtener las URLs usando `make alb-dns`
   }
   ```
 
-**Nota:** Los NLB no tienen timeout de request (a diferencia del ALB que tiene 60 segundos), por lo que pueden manejar requests largas sin problemas.
+**Nota:** Los NLB no tienen timeout de request (a diferencia del Application Load Balancer que tiene 60 segundos), por lo que pueden manejar requests largas sin problemas.
 
 ### Proceso de merge y build del generador
 
@@ -338,7 +338,7 @@ El proceso del generador se divide en dos pasos:
   - Ejemplo: `make deploy-generador MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas`
 - El modelo mergeado debe estar previamente en S3 antes de hacer el deploy
 - Los servicios son independientes: puedes desplegar métricas o generador por separado
-- Cada servicio despliega su propia infraestructura (VPC, ECS, ALB) si no existe
+- Cada servicio despliega su propia infraestructura (VPC, ECS, LB) si no existe
 - Los servicios se despliegan en ECS Fargate con Network Load Balancers (NLB):
   - Métricas: `http://{nlb-metricas-dns}:8001`
   - Generador: `http://{nlb-generador-dns}:8000`

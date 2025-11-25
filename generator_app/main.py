@@ -39,6 +39,12 @@ def index(request: Request) -> Any:
 app.include_router(api_router, prefix=settings.API_V1_STR)
 app.include_router(root_router)
 
+# Health check endpoint para ECS (compatible con gen_app.py)
+@app.get("/healthz")
+async def healthz():
+    """Health check endpoint para ECS"""
+    return {"status": "healthy"}
+
 # Set all CORS enabled origins
 if settings.BACKEND_CORS_ORIGINS:
     app.add_middleware(

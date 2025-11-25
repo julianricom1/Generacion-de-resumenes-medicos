@@ -9,9 +9,9 @@ WORKDIR /app
 # Instalar dependencias Python
 COPY requirements.txt /app/
 # Instalar PyTorch desde el índice de PyTorch para CPU
-RUN pip install --upgrade pip && \
-    pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu && \
-    pip install -r requirements.txt
+RUN pip install --upgrade pip --root-user-action=ignore && \
+    pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu --root-user-action=ignore && \
+    pip install -r requirements.txt --root-user-action=ignore
 
 # Instalar AWS CLI para descargar modelos de S3
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -24,8 +24,9 @@ RUN mkdir -p /models
 # ARG para el nombre del modelo
 ARG MODEL_NAME
 
-# Copiar el código
-COPY . /gen_app
+# Copiar el código manteniendo la estructura de directorios
+# Copiar todo el contenido a /app/generator_app para que los imports funcionen
+COPY . /app/generator_app
 
 # Variables de entorno por defecto
 ENV MODEL_PATH=/models \
@@ -40,15 +41,17 @@ ENV MODEL_PATH=/models \
     TORCH_NUM_THREADS=16 \
     OMP_NUM_THREADS=16 \
     MKL_NUM_THREADS=16 \
-    TORCH_COMPILE_DEBUG=0
+    TORCH_COMPILE_DEBUG=0 \
+    PYTHONPATH=/app
 
 EXPOSE 8000
 
 # El modelo se descargará de S3 al iniciar el contenedor
-COPY entrypoint.sh /gen_app/entrypoint.sh
-RUN chmod +x /gen_app/entrypoint.sh
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
-ENTRYPOINT ["/gen_app/entrypoint.sh"]
-# Dentro del contenedor, el código está en /app, así que el módulo se llama 'app'
-# Usar main:app si existe (versión con routers), sino gen_app:app (versión simple)
-CMD ["sh", "-c", "if [ -f /gen_app/main.py ]; then uvicorn main:app --host 0.0.0.0 --port 8000; else uvicorn gen_app:app --host 0.0.0.0 --port 8000; fi"]
+ENTRYPOINT ["/app/entrypoint.sh"]
+# El código está en /app/generator_app, así que los imports from generator_app.* funcionan
+# Usar main.py en producción (soporta modelos comerciales + fine-tuned, endpoints en /api/v1/* y /healthz)
+# gen_app.py es versión simple solo para modelo local (no soporta comerciales)
+CMD ["uvicorn", "generator_app.main:app", "--host", "0.0.0.0", "--port", "8000"]

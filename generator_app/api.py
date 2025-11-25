@@ -6,7 +6,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from fastapi import APIRouter, HTTPException
-from generator_app.gen_app import __version__
 from loguru import logger
 
 from generator_app.helpers.external_model_source import ExternalModel

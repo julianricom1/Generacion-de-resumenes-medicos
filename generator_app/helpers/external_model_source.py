@@ -2,12 +2,12 @@ from enum import Enum
 import os
 from typing import Optional
 from pathlib import Path
+from dotenv import load_dotenv
 
-from generator_app.schemas.supported_models import SupportedModels
 import openai
 import anthropic
-import os
-from dotenv import load_dotenv
+
+from generator_app.schemas.supported_models import SupportedModels
 
 
 class ExternalModel:

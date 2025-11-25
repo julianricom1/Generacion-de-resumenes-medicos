@@ -108,7 +108,7 @@ registry-destroy:
 # =========================
 .PHONY: build-metricas-image build-generador-image ecr-login push-metricas-image push-generador-image
 build-metricas-image:
-	docker build --rm --platform linux/amd64 --no-cache -f metricas/Dockerfile -t metricas-api:latest ./metricas
+	DOCKER_BUILDKIT=0 docker build --rm --platform linux/amd64 --no-cache -f metricas/Dockerfile -t metricas-api:latest ./metricas
 
 build-generador-image:
 	@if [ -z "$(MODEL_NAME)" ]; then \
@@ -123,7 +123,7 @@ build-generador-image:
 	  exit 1; \
 	}
 	@echo ">> Construyendo imagen Docker localmente..."
-	docker build --rm --platform linux/amd64 --no-cache \
+	DOCKER_BUILDKIT=0 docker build --rm --platform linux/amd64 --no-cache \
 	  --build-arg MODEL_NAME=$(MODEL_NAME) \
 	  -f generator_app/Dockerfile \
 	  -t generador-api:latest \
@@ -147,7 +147,7 @@ push-generador-image:
 # =========================
 .PHONY: vpc-init vpc-plan vpc-apply vpc-destroy \
         ecs-init ecs-plan ecs-apply ecs-destroy \
-        alb-init alb-plan alb-apply alb-destroy \
+        lb-init lb-plan lb-apply lb-destroy \
         metricas-init metricas-plan metricas-apply metricas-destroy \
         generador-init generador-plan generador-apply generador-destroy
 
@@ -183,14 +183,14 @@ ecs-destroy:
 	$(MAKE) ecs-init
 	$(MAKE) tfdestroy STACK=ecs TERRAFORM_ENV=$(TERRAFORM_ENV)
 
-# ALB
-alb-init:
+# LB
+lb-init:
 	$(MAKE) tfinit STACK=alb TERRAFORM_ENV=$(TERRAFORM_ENV)
-alb-plan:
-	@if [ ! -d "terraform/stacks/alb/.terraform" ]; then $(MAKE) alb-init; fi
+lb-plan:
+	@if [ ! -d "terraform/stacks/alb/.terraform" ]; then $(MAKE) lb-init; fi
 	$(MAKE) tfplan STACK=alb TERRAFORM_ENV=$(TERRAFORM_ENV)
-alb-apply:
-	@if [ ! -d "terraform/stacks/alb/.terraform" ]; then $(MAKE) alb-init; fi
+lb-apply:
+	@if [ ! -d "terraform/stacks/alb/.terraform" ]; then $(MAKE) lb-init; fi
 	@echo ">> Verificando target groups existentes (NLB)..."; \
 	TG_GEN_ARN=$$(aws elbv2 describe-target-groups --names metricas-nlb-generador-tg --region $(REGION) --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null | grep -v "^None$$" || true); \
 	TG_MET_ARN=$$(aws elbv2 describe-target-groups --names metricas-nlb-metricas-tg --region $(REGION) --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null | grep -v "^None$$" || true); \
@@ -212,12 +212,12 @@ alb-apply:
 	    cd ../../..; \
 	  fi; \
 	fi
-	@if [ ! -f "alb.tfplan" ]; then $(MAKE) alb-plan; fi
+	@if [ ! -f "alb.tfplan" ]; then $(MAKE) lb-plan; fi
 	$(MAKE) tfapply STACK=alb TERRAFORM_ENV=$(TERRAFORM_ENV)
-alb-destroy:
+lb-destroy:
 	@echo ">> Limpiando locks y ejecutando init..."
 	@rm -f terraform/stacks/alb/.terraform.lock.hcl
-	$(MAKE) alb-init
+	$(MAKE) lb-init
 	$(MAKE) tfdestroy STACK=alb TERRAFORM_ENV=$(TERRAFORM_ENV)
 
 # Métricas
@@ -273,9 +273,9 @@ deploy-metricas:
 	$(MAKE) ecs-init
 	$(MAKE) ecs-plan
 	$(MAKE) ecs-apply
-	$(MAKE) alb-init
-	$(MAKE) alb-plan
-	$(MAKE) alb-apply
+	$(MAKE) lb-init
+	$(MAKE) lb-plan
+	$(MAKE) lb-apply
 	@echo ">> Construyendo imagen Docker de métricas..."
 	$(MAKE) build-metricas-image
 	@echo ">> Haciendo login a ECR..."
@@ -299,9 +299,9 @@ deploy-generador:
 	$(MAKE) ecs-init
 	$(MAKE) ecs-plan
 	$(MAKE) ecs-apply
-	$(MAKE) alb-init
-	$(MAKE) alb-plan
-	$(MAKE) alb-apply
+	$(MAKE) lb-init
+	$(MAKE) lb-plan
+	$(MAKE) lb-apply
 	@echo ">> Construyendo imagen Docker del generador..."
 	$(MAKE) build-generador-image MODEL_NAME=$(MODEL_NAME)
 	@echo ">> Haciendo login a ECR..."
@@ -314,7 +314,7 @@ deploy-generador:
 	$(MAKE) generador-init
 	$(MAKE) generador-plan
 	$(MAKE) generador-apply
-	$(MAKE) alb-dns
+	$(MAKE) show_endpoints
 	@echo ">> Despliegue del generador completado."
 
 destroy-metricas:
@@ -326,8 +326,8 @@ destroy-generador:
 # =========================
 # Utilidades
 # =========================
-.PHONY: alb-dns purge-alb-enis metricas-status generador-status
-alb-dns:
+.PHONY: show_endpoints purge-lb-enis metricas-status generador-status
+show_endpoints:
 	@echo ">> Obteniendo DNS de los NLB..."
 	@if terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_generador_dns_name >/dev/null 2>&1; then \
 	  DNS_GEN=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_generador_dns_name 2>&1 | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r '); \
@@ -341,8 +341,10 @@ alb-dns:
 	    echo "  Métricas:   http://$$DNS_MET:8001"; \
 	    echo ""; \
 	    echo "  Endpoints:"; \
-	    echo "  - Generador health: http://$$DNS_GEN:8000/healthz"; \
-	    echo "  - Generador generate: http://$$DNS_GEN:8000/generate"; \
+	    echo "  - Generador health (ECS): http://$$DNS_GEN:8000/healthz"; \
+	    echo "  - Generador health (API): http://$$DNS_GEN:8000/api/v1/health"; \
+	    echo "  - Generador generate: http://$$DNS_GEN:8000/api/v1/generate"; \
+	    echo "  - Generador docs: http://$$DNS_GEN:8000/docs"; \
 	    echo "  - Métricas health: http://$$DNS_MET:8001/healthz"; \
 	    echo "  - Métricas readability: http://$$DNS_MET:8001/metrics/readability"; \
 	    echo "  - Métricas relevance: http://$$DNS_MET:8001/metrics/relevance"; \
@@ -351,10 +353,10 @@ alb-dns:
 	    echo "========================================="; \
 	    echo ""; \
 	  else \
-	    echo "   NLB aún no desplegado. Ejecuta: make alb-apply"; \
+	    echo "   NLB aún no desplegado. Ejecuta: make lb-apply"; \
 	  fi; \
 	else \
-	  echo "   NLB aún no desplegado. Ejecuta: make alb-apply"; \
+	  echo "   NLB aún no desplegado. Ejecuta: make lb-apply"; \
 	fi
 
 metricas-status:
@@ -375,7 +377,7 @@ generador-status:
 	  --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Events:events[0:3]}' \
 	  --output json | jq '.' || echo "Error al obtener el estado del servicio"
 
-purge-alb-enis:
+purge-lb-enis:
 	@echo ">> NLB no usa security groups, no hay ENIs que limpiar."
 
 # =========================
@@ -394,9 +396,9 @@ startall:
 	$(MAKE) ecs-init
 	$(MAKE) ecs-plan
 	$(MAKE) ecs-apply
-	$(MAKE) alb-init
-	$(MAKE) alb-plan
-	$(MAKE) alb-apply
+	$(MAKE) lb-init
+	$(MAKE) lb-plan
+	$(MAKE) lb-apply
 	@echo ">> Construyendo imágenes Docker..."
 	$(MAKE) build-metricas-image
 	$(MAKE) build-generador-image MODEL_NAME=$(MODEL_NAME)
@@ -415,15 +417,15 @@ startall:
 	$(MAKE) generador-init
 	$(MAKE) generador-plan
 	$(MAKE) generador-apply
-	$(MAKE) alb-dns
+	$(MAKE) show_endpoints
 
 destroyall:
 	@echo ">> Destruyendo todos los servicios..."
 	$(MAKE) destroy-generador
 	$(MAKE) destroy-metricas
-	$(MAKE) alb-destroy
+	$(MAKE) lb-destroy
 	$(MAKE) ecs-destroy
-	$(MAKE) purge-alb-enis
+	$(MAKE) purge-lb-enis
 	$(MAKE) vpc-destroy
 	$(MAKE) registry-destroy
 	$(MAKE) tf-backend-bucket-delete
@@ -472,12 +474,12 @@ stop-generador:
 
 restore-metricas:
 	@echo ">> Restaurando servicio de métricas desde imagen existente en ECR..."
-	@echo ">> Asumiendo que registry, VPC, ECS y ALB ya existen..."
+	@echo ">> Asumiendo que registry, VPC, ECS y LB ya existen..."
 	@echo ">> NO se reconstruirá ni se empujará la imagen (usando imagen existente en ECR)..."
 	$(MAKE) metricas-init
 	$(MAKE) metricas-plan
 	$(MAKE) metricas-apply
-	$(MAKE) alb-dns
+	$(MAKE) show_endpoints
 	@echo ">> Servicio restaurado. Verifica el estado con: make metricas-status"
 
 restore-generador:
@@ -486,14 +488,14 @@ restore-generador:
 	  exit 1; \
 	fi
 	@echo ">> Restaurando servicio generador desde imagen existente en ECR..."
-	@echo ">> Asumiendo que registry, VPC, ECS y ALB ya existen..."
+	@echo ">> Asumiendo que registry, VPC, ECS y LB ya existen..."
 	@echo ">> NO se reconstruirá ni se empujará la imagen (usando imagen existente en ECR)..."
 	@sed -i 's/MODEL_NAME = ".*"/MODEL_NAME = "$(MODEL_NAME)"/' terraform/environments/student/generador/terraform.tfvars || \
 	  sed -i 's/MODEL_NAME = .*/MODEL_NAME = "$(MODEL_NAME)"/' terraform/environments/student/generador/terraform.tfvars
 	$(MAKE) generador-init
 	$(MAKE) generador-plan
 	$(MAKE) generador-apply
-	$(MAKE) alb-dns
+	$(MAKE) show_endpoints
 	@echo ">> Servicio restaurado. Verifica el estado con: make generador-status"
 
 stopall:
@@ -503,7 +505,7 @@ stopall:
 	@echo ">> Deteniendo servicio generador..."
 	$(MAKE) destroy-generador
 	@echo ">> Destruyendo load balancers (NLB)..."
-	$(MAKE) alb-destroy
+	$(MAKE) lb-destroy
 	@echo ">> Destruyendo cluster ECS..."
 	$(MAKE) ecs-destroy
 	@echo ">> Todos los servicios, load balancers y cluster ECS detenidos."
@@ -524,9 +526,9 @@ restoreall:
 	$(MAKE) ecs-plan
 	$(MAKE) ecs-apply
 	@echo ">> Recreando load balancers (NLB)..."
-	$(MAKE) alb-init
-	$(MAKE) alb-plan
-	$(MAKE) alb-apply
+	$(MAKE) lb-init
+	$(MAKE) lb-plan
+	$(MAKE) lb-apply
 	@echo ">> Restaurando servicio de métricas..."
 	$(MAKE) metricas-init
 	$(MAKE) metricas-plan
@@ -538,6 +540,6 @@ restoreall:
 	$(MAKE) generador-plan
 	$(MAKE) generador-apply
 	@echo ">> Mostrando URLs de los servicios..."
-	$(MAKE) alb-dns
+	$(MAKE) show_endpoints
 	@echo ">> Todos los servicios, load balancers y cluster ECS restaurados."
 	@echo ">> Verifica el estado con: make metricas-status y make generador-status"
