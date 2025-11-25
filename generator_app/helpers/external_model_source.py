@@ -1,15 +1,9 @@
 from enum import Enum
 import os
 from typing import Optional
-# Imports que funcionan tanto localmente (generator_app) como en Docker (/app)
 from pathlib import Path
 
-if Path(__file__).parent.parent.parent.name == "generator_app":
-    # Ejecutándose localmente
-    from generator_app.schemas.supported_models import SupportedModels
-else:
-    # Ejecutándose en Docker (código en /app)
-    from app.schemas.supported_models import SupportedModels
+from generator_app.schemas.supported_models import SupportedModels
 import openai
 import anthropic
 import os

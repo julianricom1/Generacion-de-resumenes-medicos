@@ -25,7 +25,7 @@ RUN mkdir -p /models
 ARG MODEL_NAME
 
 # Copiar el código
-COPY . /app
+COPY . /gen_app
 
 # Variables de entorno por defecto
 ENV MODEL_PATH=/models \
@@ -45,10 +45,10 @@ ENV MODEL_PATH=/models \
 EXPOSE 8000
 
 # El modelo se descargará de S3 al iniciar el contenedor
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+COPY entrypoint.sh /gen_app/entrypoint.sh
+RUN chmod +x /gen_app/entrypoint.sh
 
-ENTRYPOINT ["/app/entrypoint.sh"]
+ENTRYPOINT ["/gen_app/entrypoint.sh"]
 # Dentro del contenedor, el código está en /app, así que el módulo se llama 'app'
-# Usar main:app si existe (versión con routers), sino app:app (versión simple)
-CMD ["sh", "-c", "if [ -f /app/main.py ]; then uvicorn main:app --host 0.0.0.0 --port 8000; else uvicorn app:app --host 0.0.0.0 --port 8000; fi"]
+# Usar main:app si existe (versión con routers), sino gen_app:app (versión simple)
+CMD ["sh", "-c", "if [ -f /gen_app/main.py ]; then uvicorn main:app --host 0.0.0.0 --port 8000; else uvicorn gen_app:app --host 0.0.0.0 --port 8000; fi"]

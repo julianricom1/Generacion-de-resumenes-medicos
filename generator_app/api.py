@@ -6,23 +6,15 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from fastapi import APIRouter, HTTPException
+from generator_app.gen_app import __version__
 from loguru import logger
 
-# Ajustar imports según el contexto
-if Path(__file__).parent.parent.name == "generator_app":
-    # Ejecutándose localmente
-    from generator_app.helpers.external_model_source import ExternalModel
-    from generator_app.helpers.finned_tunned_model import FinnedTunnedModel
-    from generator_app.schemas.supported_models import SupportedModels
-    from generator_app import __version__, schemas
-    from generator_app.config import settings
-else:
-    # Ejecutándose en Docker (código en /app)
-    from app.helpers.external_model_source import ExternalModel
-    from app.helpers.finned_tunned_model import FinnedTunnedModel
-    from app.schemas.supported_models import SupportedModels
-    from app import __version__, schemas
-    from app.config import settings
+from generator_app.helpers.external_model_source import ExternalModel
+from generator_app.helpers.finned_tunned_model import FinnedTunnedModel
+from generator_app.schemas.supported_models import SupportedModels
+from generator_app import __version__, schemas
+from generator_app.config import settings
+
 
 MODEL_VERSION = "0.1.0"
 ###
