@@ -16,11 +16,10 @@ SYSTEM_PROMPT = (
     "and preserve key facts (objective, population, interventions, outcomes, timelines, safety)."
 )
 USER_PREFIX = "Using the following clinical trial protocol text as input, create a plain language summary.\n\n"
+MODEL_PATH = os.getenv("MODEL_PATH", "/models")
+MODEL_NAME = os.getenv("MODEL_NAME", "")
 
-MODEL_DIR = os.getenv(
-    "MODEL_DIR",
-    "generacion/ollama/outputs/meta-llama__Llama-3.2-3B-Instruct-FKGD9_Sliding_Window/final",
-)
+MODEL_DIR = Path(MODEL_PATH) / MODEL_NAME
 
 GEN_CFG = dict(
     max_new_tokens=int(os.getenv("MAX_NEW_TOKENS", "512")),
@@ -87,7 +86,6 @@ class FinnedTunnedModel:
         """
         Load the model and tokenizer. This method is called only once during initialization.
         """
-        print('Loading model from:', model_dir)
         hf_token = os.getenv("HUGGINGFACE_HUB_TOKEN")
         model_dir = str(Path(model_dir).resolve())
         cfg_path = Path(model_dir) / "adapter_config.json"
@@ -99,33 +97,23 @@ class FinnedTunnedModel:
         if not base:
             raise ValueError("adapter_config.json no contiene 'base_model_name_or_path'.")
 
-        print('model_dir')
-        print(model_dir)
         tok = AutoTokenizer.from_pretrained(model_dir, token=hf_token, use_fast=True, trust_remote_code=True)
         if tok.pad_token is None:
             tok.pad_token = tok.eos_token
         tok.padding_side = "left"
-        print('model_dir2')
-        print(base)
 
         base_model = AutoModelForCausalLM.from_pretrained(
             base,
             torch_dtype=torch.float16 if device.startswith("cuda") else torch.float32,
             trust_remote_code=True
         ).to(device)
-        print('model_dir3')
 
         base_model.resize_token_embeddings(len(tok))
-        print('model_dir4')
 
-        print('type of base_model:', type(base_model))
         model = PeftModel.from_pretrained(base_model, model_dir, is_trainable=False, local_files_only=True)
-        print('model_dir5')
 
         ##model.eval()
         model.config.pad_token_id = tok.pad_token_id
-        print('model_dir6')
-
         eos_id = None
         try:
             eid = tok.convert_tokens_to_ids("<|sentence_end|>")
