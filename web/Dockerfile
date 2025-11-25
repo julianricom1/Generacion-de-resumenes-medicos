@@ -1,5 +1,16 @@
 # Stage 1: Build the React app
 FROM node:22 AS build
+
+# Accept build arguments
+ARG VITE_CLASSIFICATION_DOMAIN
+ARG VITE_GENERATION_DOMAIN
+ARG VITE_METRICS_DOMAIN
+
+# Set them as environment variables for the build
+ENV VITE_CLASSIFICATION_DOMAIN=${VITE_CLASSIFICATION_DOMAIN}
+ENV VITE_GENERATION_DOMAIN=${VITE_GENERATION_DOMAIN}
+ENV VITE_METRICS_DOMAIN=${VITE_METRICS_DOMAIN}
+
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN yarn

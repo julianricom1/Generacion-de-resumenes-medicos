@@ -12,7 +12,8 @@ function useGeneration({ inputText, doCall = false, modelName }) {
     if (doCall) fetchPrediction(inputText);
   }, [doCall]);
 
-  const API_DOMAIN = `http://${window.location.hostname}:8002`; // Default to "http://localhost" if not set
+  const domain = import.meta.env.VITE_GENERATION_DOMAIN;
+  const API_DOMAIN = domain || `http://${window.location.hostname}:8002`; // Default to "http://localhost" if not set
   //const PORT = process.env.REACT_APP_PORT || "8000";
 
   const fetchPrediction = async text => {
