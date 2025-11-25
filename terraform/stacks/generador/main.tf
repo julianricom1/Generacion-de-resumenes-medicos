@@ -6,6 +6,9 @@ terraform {
       version = ">= 5.0"
     }
   }
+  backend "s3" {
+    # Configurado via -backend-config
+  }
 }
 
 provider "aws" {
@@ -43,8 +46,7 @@ data "terraform_remote_state" "alb" {
 
 locals {
   account_id      = data.aws_caller_identity.current.account_id
-  # var.image debe venir como "repo:tag" (p.ej. "metricas-api:latest")
-  container_image  = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.region}.amazonaws.com/metricas-api:latest"
+  container_image = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.region}.amazonaws.com/generador-api:latest"
   container_port   = var.container_port
 }
 
@@ -63,7 +65,7 @@ module "app" {
   task_cpu         = var.cpu
   task_memory      = var.memory
   desired_count    = var.desired_count
-  target_group_arn = data.terraform_remote_state.alb.outputs.nlb_metricas_target_group_arn
+  target_group_arn = data.terraform_remote_state.alb.outputs.nlb_generador_target_group_arn
   env_vars         = var.env_vars
 }
 

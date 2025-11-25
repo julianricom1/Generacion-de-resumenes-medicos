@@ -1,20 +1,32 @@
-.git
-.gitignore
-.vscode
-*.swp
-
-__pycache__/
+__pycache__
 *.pyc
 *.pyo
 *.pyd
-*.pytest_cache/
-.venv/
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.venv
+venv
 .env
-
-data/
-EXPLORACION/
+.git
+.gitignore
+*.md
+*.txt
+!requirements.txt
 *.ipynb
-
-terraform/
-**/.terraform/
-**/terraform.tfstate*
+.pytest_cache
+.coverage
+htmlcov
+.DS_Store
+*.log
+# Excluir modelos (se descargan de S3 al iniciar)
+models/
+# Excluir directorios temporales de merge
+generacion/
+# Excluir scripts de merge (no se usan en el contenedor)
+merge_lora.py
+merge_and_upload_to_s3.ipynb
+upload_base_model_to_s3.py

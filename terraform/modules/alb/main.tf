@@ -44,6 +44,10 @@ resource "aws_lb_target_group" "app" {
   
   # Timeout para requests largos (modelos ML)
   deregistration_delay = 30
+
+  lifecycle {
+    create_before_destroy = true
+  }
 }
 
 resource "aws_lb_listener" "http" {

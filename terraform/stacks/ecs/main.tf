@@ -6,9 +6,6 @@ terraform {
 provider "aws" { region = var.region }
 
 module "ecs" {
-  source              = "./../../modules/ecs"
-  name                = var.cluster_name
-  log_group_retention = var.log_retention_days
-  execution_role_arn = var.execution_role_arn
-
+  source = "./../../modules/ecs"
+  name   = var.cluster_name
 }

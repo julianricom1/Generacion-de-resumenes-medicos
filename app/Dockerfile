@@ -1,24 +1,52 @@
-# -------- Stage 1: builder --------
-FROM python:3.11-slim AS builder
-ENV PIP_NO_CACHE_DIR=1 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
- && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-# OJO: el contexto es la RAÍZ; estas rutas son correctas
-COPY requirements.txt ./
-#COPY model-pkg/textclf_svm-0.1.0-py3-none-any.whl ./model-pkg/
-RUN python -m venv /opt/venv \
- && /opt/venv/bin/pip install --upgrade pip \
- && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+FROM python:3.10-slim
 
-# -------- Stage 2: runtime --------
-FROM python:3.11-slim AS runtime
-ENV PATH="/opt/venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-RUN useradd -m appuser
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
 WORKDIR /app
-COPY --from=builder /opt/venv /opt/venv
-# desde la RAÍZ copiamos el código
-COPY app/ ./app/
+
+# Instalar dependencias Python
+COPY requirements.txt /app/
+# Instalar PyTorch desde el índice de PyTorch para CPU
+RUN pip install --upgrade pip && \
+    pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu && \
+    pip install -r requirements.txt
+
+# Instalar AWS CLI para descargar modelos de S3
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    awscli \
+    && rm -rf /var/lib/apt/lists/*
+
+# Crear directorio para modelos
+RUN mkdir -p /models
+
+# ARG para el nombre del modelo
+ARG MODEL_NAME
+
+# Copiar el código
+COPY . /app
+
+# Variables de entorno por defecto
+ENV MODEL_PATH=/models \
+    MODEL_NAME=${MODEL_NAME} \
+    MAX_NEW_TOKENS=512 \
+    TEMPERATURE=0.2 \
+    TOP_P=0.95 \
+    REPEAT_PENALTY=1.015 \
+    DEVICE=cpu \
+    PORT=8000 \
+    MODEL_S3_BUCKET=modelo-generador-maia-g8 \
+    TORCH_NUM_THREADS=16 \
+    OMP_NUM_THREADS=16 \
+    MKL_NUM_THREADS=16 \
+    TORCH_COMPILE_DEBUG=0
+
 EXPOSE 8000
-USER appuser
-CMD ["uvicorn","app.main:app","--host","0.0.0.0","--port","8000"]
+
+# El modelo se descargará de S3 al iniciar el contenedor
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

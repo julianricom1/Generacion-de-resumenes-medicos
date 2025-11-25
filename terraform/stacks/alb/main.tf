@@ -15,11 +15,22 @@ data "terraform_remote_state" "vpc" {
 }
 
 
-module "alb" {
-  source         = "./../../modules/alb"
-  name           = var.alb_name
+# NLB para generador (puerto 8000)
+module "nlb_generador" {
+  source         = "./../../modules/nlb"
+  name           = "${var.alb_name}-generador"
   vpc_id         = data.terraform_remote_state.vpc.outputs.vpc_id
   public_subnets = data.terraform_remote_state.vpc.outputs.public_subnets
-  target_port    = var.target_port       # 8000
-  health_path    = var.health_path       # "/health"
+  target_port    = 8000
+  listener_port  = 8000
+}
+
+# NLB para métricas (puerto 8001)
+module "nlb_metricas" {
+  source         = "./../../modules/nlb"
+  name           = "${var.alb_name}-metricas"
+  vpc_id         = data.terraform_remote_state.vpc.outputs.vpc_id
+  public_subnets = data.terraform_remote_state.vpc.outputs.public_subnets
+  target_port    = 8001
+  listener_port  = 8001
 }
