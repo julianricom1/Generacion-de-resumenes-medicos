@@ -1,7 +1,7 @@
 import logging
 import sys
 from types import FrameType
-from typing import List, cast
+from typing import List, Union, cast
 
 from loguru import logger
 from pydantic import AnyHttpUrl, BaseSettings
@@ -19,13 +19,9 @@ class Settings(BaseSettings):
 
     # BACKEND_CORS_ORIGINS is a comma-separated list of origins
     # e.g: http://localhost,http://localhost:4200,http://localhost:3000
-    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = [
-        "http://localhost:3000",  # type: ignore
-        "http://localhost:8000",  # type: ignore
-        "https://localhost:3000",  # type: ignore
-        "https://localhost:8000",  # type: ignore
-        "http://localhost:5173",  # type: ignore
-        "https://localhost:5173",  # type: ignore
+    # For production, set to ["*"] to allow all origins or specify exact origins
+    BACKEND_CORS_ORIGINS: Union[List[str], List[AnyHttpUrl]] = [
+        "*"  # Allow all origins - for production, consider restricting to specific domains
     ]
 
     PROJECT_NAME: str = "Generacion de resumenes medicos"
