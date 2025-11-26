@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 
-const DEFAULT_BASE_URL = `http://${window.location.hostname}:8000`;
+const domain = import.meta.env.VITE_METRICS_DOMAIN;
+const DEFAULT_BASE_URL = domain || `http://${window.location.hostname}:8001`;
 
 function useMetrics({ text, doCall = false }) {
   const [loading, setLoading] = useState(false);
@@ -61,7 +62,7 @@ function useMetrics({ text, doCall = false }) {
   };
   const getCategory = readability => {
     console.log('Readability:', readability);
-    if (readability => 15 && readability <= 18) {
+    if (readability >= 15 && readability <= 18) {
       setCategory('Postgrado');
     } else if (readability >= 12 && readability < 15) {
       setCategory('Pregrado');
