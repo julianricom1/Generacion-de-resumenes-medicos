@@ -1,5 +1,12 @@
 # Generacion-de-resumenes.-medicos
 
+Sistema completo para generación, evaluación y clasificación de resúmenes médicos en lenguaje simple (PLS - Plain Language Summaries).
+
+**Componentes del sistema:**
+- **Métricas**: 5 métricas para evaluar la calidad de los resúmenes generados
+- **Generador**: Servicio para generar resúmenes médicos usando modelos LLM fine-tuned
+- **Clasificador**: Servicio para clasificar textos médicos
+
 **En este sub-sistema se implementan 5 métricas que son relevantes para el problema de PLS**
 
 ## Qué mide cada métrica
@@ -70,7 +77,7 @@ print(getReadability(G))
 
 ## Despliegue en AWS
 
-El proyecto incluye un Makefile con comandos para desplegar los servicios de métricas y generación en AWS usando Terraform y ECS Fargate.
+El proyecto incluye un Makefile con comandos para desplegar los servicios de métricas, generación y clasificación en AWS usando Terraform y ECS Fargate.
 
 ### Comandos principales
 
@@ -79,7 +86,7 @@ El proyecto incluye un Makefile con comandos para desplegar los servicios de mé
 # PASO 1: Merge y subida a S3 (hacer una vez, localmente en Windows con Jupyter)
 # Abre y ejecuta el notebook: generator_app/merge_and_upload_to_s3.ipynb
 
-# PASO 2: Desplegar toda la infraestructura (métricas + generador)
+# PASO 2: Desplegar toda la infraestructura (métricas + generador + clasificador)
 make startall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
 
 # Destruir toda la infraestructura
@@ -130,6 +137,27 @@ make restore-generador MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
 
 # Re-desplegar (reconstruir imagen y actualizar servicio)
 make redeploy-generador MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
+```
+
+**Clasificador:**
+```bash
+# Desplegar servicio de clasificación (incluye toda la infraestructura necesaria)
+make deploy-clasificador
+
+# Destruir servicio (elimina completamente)
+make destroy-clasificador
+
+# Detener servicio (preserva imagen en ECR, elimina solo el servicio ECS)
+make stop-clasificador
+
+# Restaurar servicio (usa imagen existente en ECR, no reconstruye)
+make restore-clasificador
+
+# Re-desplegar (reconstruir imagen y actualizar servicio)
+make redeploy-clasificador
+
+# Ver estado del servicio
+make clasificador-status
 ```
 
 **Comandos para todos los servicios:**
@@ -227,7 +255,7 @@ env_vars = {
 ### Utilidades
 
 ```bash
-# Obtener URLs del NLB
+# Obtener URLs del NLB (muestra todos los endpoints de los servicios)
 make show_endpoints
 
 # Ver estado del servicio de métricas
@@ -235,6 +263,9 @@ make metricas-status
 
 # Ver estado del servicio generador
 make generador-status
+
+# Ver estado del servicio clasificador
+make clasificador-status
 ```
 
 ### Endpoints de la API
@@ -276,13 +307,33 @@ Una vez desplegados los servicios, puedes obtener las URLs usando `make show_end
 
 **Servicio Generador** (puerto 8000):
 - Base URL: `http://{nlb-generador-dns}:8000`
-- Health check: `GET http://{nlb-generador-dns}:8000/healthz`
-- Generar resumen: `POST http://{nlb-generador-dns}:8000/generate`
+- Health check (ECS): `GET http://{nlb-generador-dns}:8000/healthz`
+- Health check (API detallado): `GET http://{nlb-generador-dns}:8000/api/v1/health`
+- Generar resumen: `POST http://{nlb-generador-dns}:8000/api/v1/generate`
   ```json
   {
-    "text": "Texto médico a resumir..."
+    "inputs": ["Texto médico a resumir..."],
+    "model": "ollama_finned_tunned"
   }
   ```
+  **Modelos soportados:**
+  - `"ollama_finned_tunned"`: Modelo fine-tuned local
+  - `"claude-sonnet-4-5"`: Claude Sonnet 4.5 (requiere API key)
+  - `"gpt-4-turbo-preview"`: GPT-4 Turbo (requiere API key)
+  - `"gpt-5"`: GPT-5 (requiere API key)
+- Documentación interactiva: `http://{nlb-generador-dns}:8000/docs`
+
+**Servicio Clasificador** (puerto 8002):
+- Base URL: `http://{nlb-clasificador-dns}:8002`
+- Health check (ECS/NLB): `GET http://{nlb-clasificador-dns}:8002/healthz`
+- Health check (API detallado): `GET http://{nlb-clasificador-dns}:8002/api/v1/health`
+- Clasificar texto: `POST http://{nlb-clasificador-dns}:8002/api/v1/predict`
+  ```json
+  {
+    "inputs": ["texto médico a clasificar 1", "texto médico a clasificar 2"]
+  }
+  ```
+- Documentación interactiva: `http://{nlb-clasificador-dns}:8002/docs`
 
 **Nota:** Los NLB no tienen timeout de request (a diferencia del Application Load Balancer que tiene 60 segundos), por lo que pueden manejar requests largas sin problemas.
 
@@ -322,10 +373,13 @@ El proceso del generador se divide en dos pasos:
 - **El modelo se descarga de S3 solo cuando se necesita**: más eficiente
 - **No necesitas tener el LoRA localmente**: se descarga desde S3 durante el merge
 
-**Configuración del bucket S3:**
-- Bucket permanente: `modelo-generador-maia-g8`
-- Modelos mergeados en S3: `s3://modelo-generador-maia-g8/merged-models/{MODEL_NAME}/`
-- Este bucket no se modifica ni elimina por el proceso de deployment
+**Configuración de los buckets S3:**
+- **Bucket del generador**: `modelo-generador-maia-g8`
+  - Modelos mergeados en S3: `s3://modelo-generador-maia-g8/merged-models/{MODEL_NAME}/`
+  - Este bucket no se modifica ni elimina por el proceso de deployment
+- **Bucket de métricas (factualidad)**: `modelo-factualidad`
+  - Modelo AlignScore: `s3://modelo-factualidad/AlignScore-base.ckpt`
+  - El modelo se descarga desde S3 al iniciar el contenedor de métricas
 
 ### Notas importantes
 
@@ -337,11 +391,15 @@ El proceso del generador se divide en dos pasos:
   - El `MODEL_NAME` es el nombre del modelo mergeado que está en S3
   - Ejemplo: `make deploy-generador MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas`
 - El modelo mergeado debe estar previamente en S3 antes de hacer el deploy
-- Los servicios son independientes: puedes desplegar métricas o generador por separado
+- Los servicios son independientes: puedes desplegar métricas, generador o clasificador por separado
+- **Métricas**: El modelo AlignScore se descarga desde `s3://modelo-factualidad/AlignScore-base.ckpt` al iniciar el contenedor
+- **Generador**: El modelo fine-tuned se descarga desde `s3://modelo-generador-maia-g8/merged-models/{MODEL_NAME}/` al iniciar el contenedor
+- **Clasificador**: No requiere configuración especial, solo ejecuta `make deploy-clasificador`
 - Cada servicio despliega su propia infraestructura (VPC, ECS, LB) si no existe
 - Los servicios se despliegan en ECS Fargate con Network Load Balancers (NLB):
   - Métricas: `http://{nlb-metricas-dns}:8001`
   - Generador: `http://{nlb-generador-dns}:8000`
+  - Clasificador: `http://{nlb-clasificador-dns}:8002`
 - **CloudWatch Logs no se usa**: los logs de los contenedores no se almacenan en CloudWatch
 - **Manejo automático de Terraform**: Los comandos de destroy (`destroy-metricas`, `destroy-generador`, `destroyall`, etc.) manejan automáticamente los problemas de lock file inconsistentes, ejecutando `init` cuando es necesario
 - **Bucket S3 del LoRA**: El bucket `modelo-generador-maia-g8` es permanente y no se modifica ni elimina por el proceso de deployment. Asegúrate de que el LoRA esté subido antes de ejecutar el build.

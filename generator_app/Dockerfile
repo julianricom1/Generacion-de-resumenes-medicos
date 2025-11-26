@@ -11,12 +11,8 @@ COPY requirements.txt /app/
 # Instalar PyTorch desde el índice de PyTorch para CPU
 RUN pip install --upgrade pip --root-user-action=ignore && \
     pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu --root-user-action=ignore && \
-    pip install -r requirements.txt --root-user-action=ignore
-
-# Instalar AWS CLI para descargar modelos de S3
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    awscli \
-    && rm -rf /var/lib/apt/lists/*
+    pip install -r requirements.txt --root-user-action=ignore && \
+    pip install awscli --root-user-action=ignore
 
 # Crear directorio para modelos
 RUN mkdir -p /models
@@ -52,6 +48,10 @@ RUN chmod +x /app/entrypoint.sh
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 # El código está en /app/generator_app, así que los imports from generator_app.* funcionan
-# Usar main.py en producción (soporta modelos comerciales + fine-tuned, endpoints en /api/v1/* y /healthz)
-# gen_app.py es versión simple solo para modelo local (no soporta comerciales)
+# main.py es la aplicación principal (soporta modelos comerciales + fine-tuned)
+# Endpoints disponibles:
+#   - /healthz (health check simple para ECS)
+#   - /api/v1/health (health check detallado con información de versión)
+#   - /api/v1/generate (generación de resúmenes)
+#   - /docs (documentación interactiva de FastAPI)
 CMD ["uvicorn", "generator_app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -39,6 +39,12 @@ def index(request: Request) -> Any:
 app.include_router(api_router, prefix=settings.API_V1_STR)
 app.include_router(root_router)
 
+# Health check endpoint para ECS/NLB (en la raíz, sin prefijo)
+@app.get("/healthz")
+async def healthz():
+    """Health check endpoint para ECS/NLB"""
+    return {"status": "healthy"}
+
 # Set all CORS enabled origins
 if settings.BACKEND_CORS_ORIGINS:
     app.add_middleware(
@@ -56,4 +62,4 @@ if __name__ == "__main__":
     import uvicorn
 
     # ejecución del servidor - host para ejecutar en servidor 
-    uvicorn.run(app, host="0.0.0.0", port=8001, log_level="debug")
+    uvicorn.run(app, host="0.0.0.0", port=8002, log_level="debug")

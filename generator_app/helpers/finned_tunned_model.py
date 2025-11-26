@@ -85,34 +85,43 @@ class FinnedTunnedModel:
     def load_model_and_tokenizer(self, model_dir: str, device: str = DEVICE):
         """
         Load the model and tokenizer. This method is called only once during initialization.
+        Supports both LoRA models (with adapter_config.json) and merged models (without adapter_config.json).
         """
         hf_token = os.getenv("HUGGINGFACE_HUB_TOKEN")
         model_dir = str(Path(model_dir).resolve())
         cfg_path = Path(model_dir) / "adapter_config.json"
-        if not cfg_path.exists():
-            raise FileNotFoundError(f"No existe {cfg_path}")
-
-        adapter_cfg = json.loads(Path(cfg_path).read_text(encoding="utf-8"))
-        base = adapter_cfg.get("base_model_name_or_path")
-        if not base:
-            raise ValueError("adapter_config.json no contiene 'base_model_name_or_path'.")
-
+        
         tok = AutoTokenizer.from_pretrained(model_dir, token=hf_token, use_fast=True, trust_remote_code=True)
         if tok.pad_token is None:
             tok.pad_token = tok.eos_token
         tok.padding_side = "left"
+        
+        if cfg_path.exists():
+            # Load as LoRA model
+            print(f"Cargando modelo LoRA desde {model_dir}")
+            adapter_cfg = json.loads(Path(cfg_path).read_text(encoding="utf-8"))
+            base = adapter_cfg.get("base_model_name_or_path")
+            if not base:
+                raise ValueError("adapter_config.json no contiene 'base_model_name_or_path'.")
 
-        base_model = AutoModelForCausalLM.from_pretrained(
-            base,
-            torch_dtype=torch.float16 if device.startswith("cuda") else torch.float32,
-            trust_remote_code=True
-        ).to(device)
+            base_model = AutoModelForCausalLM.from_pretrained(
+                base,
+                torch_dtype=torch.float16 if device.startswith("cuda") else torch.float32,
+                trust_remote_code=True
+            ).to(device)
 
-        base_model.resize_token_embeddings(len(tok))
+            base_model.resize_token_embeddings(len(tok))
+            model = PeftModel.from_pretrained(base_model, model_dir, is_trainable=False, local_files_only=True)
+        else:
+            # Load as merged/full model (no adapter_config.json)
+            print(f"Cargando modelo mergeado completo desde {model_dir}")
+            model = AutoModelForCausalLM.from_pretrained(
+                model_dir,
+                torch_dtype=torch.float16 if device.startswith("cuda") else torch.float32,
+                trust_remote_code=True,
+                local_files_only=True
+            ).to(device)
 
-        model = PeftModel.from_pretrained(base_model, model_dir, is_trainable=False, local_files_only=True)
-
-        ##model.eval()
         model.config.pad_token_id = tok.pad_token_id
         eos_id = None
         try:

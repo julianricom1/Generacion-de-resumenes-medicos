@@ -25,7 +25,7 @@ api_router = APIRouter()
 @api_router.get("/health", response_model=schemas.Health, status_code=200)
 def health() -> dict:
     """
-    Root Get
+    Health check detallado de la API
     """
     health = schemas.Health(
         name=settings.PROJECT_NAME, api_version=__version__, model_version=MODEL_VERSION

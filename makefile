@@ -106,7 +106,7 @@ registry-destroy:
 # =========================
 # Docker Image
 # =========================
-.PHONY: build-metricas-image build-generador-image ecr-login push-metricas-image push-generador-image
+.PHONY: build-metricas-image build-generador-image build-clasificador-api-image ecr-login push-metricas-image push-generador-image push-clasificador-api-image
 build-metricas-image:
 	DOCKER_BUILDKIT=0 docker build --rm --platform linux/amd64 --no-cache -f metricas/Dockerfile -t metricas-api:latest ./metricas
 
@@ -140,7 +140,29 @@ push-generador-image:
 	docker tag "generador-api:latest" "$(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/generador-api:latest"
 	docker push "$(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/generador-api:latest"
 
+push-clasificador-api-image:
+	@echo ">> Verificando que el repositorio ECR 'clasificador-api' existe..."
+	@aws ecr describe-repositories --repository-names clasificador-api --region $(REGION) >/dev/null 2>&1 || { \
+	  echo "ERROR: El repositorio ECR 'clasificador-api' no existe."; \
+	  echo "       Ejecuta primero: make deploy-infra"; \
+	  exit 1; \
+	}
+	@echo ">> Etiquetando imagen para ECR..."
+	docker tag "clasificador-api:latest" "$(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/clasificador-api:latest"
+	@echo ">> Subiendo imagen a ECR..."
+	docker push "$(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/clasificador-api:latest"
+	@echo ">> Imagen del clasificador-api subida exitosamente a ECR"
 
+build-clasificador-api-image:
+	@echo ">> Construyendo imagen Docker del clasificador-api..."
+	@echo ">> Esto puede tardar varios minutos (multi-stage build con dependencias Python)..."
+	@echo ">> Stage 1: Builder (instalando build-essential y dependencias)..."
+	@echo ">> Stage 2: Runtime (configurando entorno final)..."
+	docker build --rm --platform linux/amd64 --no-cache \
+	  -f clasificador_app/Dockerfile \
+	  -t clasificador-api:latest \
+	  .
+	@echo ">> Build del clasificador-api completado exitosamente"
 
 # =========================
 # Terraform Stacks
@@ -149,7 +171,9 @@ push-generador-image:
         ecs-init ecs-plan ecs-apply ecs-destroy \
         lb-init lb-plan lb-apply lb-destroy \
         metricas-init metricas-plan metricas-apply metricas-destroy \
-        generador-init generador-plan generador-apply generador-destroy
+        generador-init generador-plan generador-apply generador-destroy \
+        clasificador-api-init clasificador-api-plan clasificador-api-apply clasificador-api-destroy \
+        web-init web-plan web-apply web-destroy
 
 # VPC
 vpc-init:
@@ -222,12 +246,16 @@ lb-destroy:
 
 # Métricas
 metricas-init:
+	@echo ">> Inicializando backend de métricas..."
+	@rm -f terraform/stacks/app/.terraform.lock.hcl
 	$(MAKE) tfinit STACK=app TERRAFORM_ENV=$(TERRAFORM_ENV)
 metricas-plan:
-	@if [ ! -d "terraform/stacks/app/.terraform" ]; then $(MAKE) metricas-init; fi
+	@echo ">> Asegurando backend correcto de métricas..."
+	@$(MAKE) metricas-init
 	$(MAKE) tfplan STACK=app TERRAFORM_ENV=$(TERRAFORM_ENV)
 metricas-apply:
-	@if [ ! -d "terraform/stacks/app/.terraform" ]; then $(MAKE) metricas-init; fi
+	@echo ">> Asegurando backend correcto de métricas..."
+	@$(MAKE) metricas-init
 	@if [ ! -f "app.tfplan" ]; then $(MAKE) metricas-plan; fi
 	$(MAKE) tfapply STACK=app TERRAFORM_ENV=$(TERRAFORM_ENV)
 metricas-destroy:
@@ -252,10 +280,57 @@ generador-destroy:
 	$(MAKE) generador-init
 	$(MAKE) tfdestroy STACK=generador TERRAFORM_ENV=$(TERRAFORM_ENV)
 
+# Clasificador API
+clasificador-api-init:
+	@echo ">> Inicializando backend de clasificador-api..."
+	@rm -f terraform/stacks/app/.terraform.lock.hcl
+	terraform -chdir="$(shell pwd)/terraform/stacks/app" init -reconfigure \
+	  -backend-config="$(shell pwd)/terraform/environments/$(TERRAFORM_ENV)/clasificador-api/backend.tfvars"
+clasificador-api-plan:
+	@echo ">> Asegurando backend correcto de clasificador-api..."
+	@$(MAKE) clasificador-api-init
+	@echo ">> Obteniendo target group ARN del NLB..."
+	@TG_ARN=$$(terraform -chdir="terraform/stacks/alb" output -raw nlb_clasificador_target_group_arn 2>/dev/null || echo ""); \
+	if [ -n "$$TG_ARN" ] && [ "$$TG_ARN" != "" ]; then \
+	  echo ">> Actualizando terraform.tfvars con target_group_arn..."; \
+	  sed -i.bak "s|target_group_arn = .*|target_group_arn = \"$$TG_ARN\"|" terraform/environments/student/clasificador-api/terraform.tfvars; \
+	  rm -f terraform/environments/student/clasificador-api/terraform.tfvars.bak; \
+	fi
+	terraform -chdir="$(shell pwd)/terraform/stacks/app" plan \
+	  -var-file="$(shell pwd)/terraform/environments/$(TERRAFORM_ENV)/clasificador-api/terraform.tfvars" \
+	  -out="clasificador-api.tfplan"
+clasificador-api-apply:
+	@echo ">> Asegurando backend correcto de clasificador-api..."
+	@$(MAKE) clasificador-api-init
+	@if [ ! -f "clasificador-api.tfplan" ]; then $(MAKE) clasificador-api-plan; fi
+	terraform -chdir="$(shell pwd)/terraform/stacks/app" apply "clasificador-api.tfplan"
+clasificador-api-destroy:
+	@echo ">> Limpiando locks y ejecutando init..."
+	@rm -f terraform/stacks/app/.terraform.lock.hcl
+	$(MAKE) clasificador-api-init
+	terraform -chdir="$(shell pwd)/terraform/stacks/app" destroy -auto-approve \
+	  -var-file="$(shell pwd)/terraform/environments/$(TERRAFORM_ENV)/clasificador-api/terraform.tfvars"
+
+# Web (Frontend)
+web-init:
+	$(MAKE) tfinit STACK=web TERRAFORM_ENV=$(TERRAFORM_ENV)
+web-plan:
+	@if [ ! -d "terraform/stacks/web/.terraform" ]; then $(MAKE) web-init; fi
+	$(MAKE) tfplan STACK=web TERRAFORM_ENV=$(TERRAFORM_ENV)
+web-apply:
+	@if [ ! -d "terraform/stacks/web/.terraform" ]; then $(MAKE) web-init; fi
+	@if [ ! -f "web.tfplan" ]; then $(MAKE) web-plan; fi
+	$(MAKE) tfapply STACK=web TERRAFORM_ENV=$(TERRAFORM_ENV)
+web-destroy:
+	@echo ">> Limpiando locks y ejecutando init..."
+	@rm -f terraform/stacks/web/.terraform.lock.hcl
+	$(MAKE) web-init
+	$(MAKE) tfdestroy STACK=web TERRAFORM_ENV=$(TERRAFORM_ENV)
+
 # =========================
 # Orquestación
 # =========================
-.PHONY: deploy-infra deploy-vpc deploy-metricas deploy-generador destroy-metricas destroy-generador
+.PHONY: deploy-infra deploy-vpc deploy-metricas deploy-generador deploy-clasificador destroy-metricas destroy-generador destroy-clasificador
 deploy-infra:
 	$(MAKE) registry-init
 	$(MAKE) registry-plan
@@ -323,40 +398,77 @@ destroy-metricas:
 destroy-generador:
 	$(MAKE) generador-destroy
 
+deploy-clasificador:
+	@echo ">> Desplegando clasificador (infraestructura completa)..."
+	$(MAKE) deploy-infra
+	$(MAKE) deploy-vpc
+	$(MAKE) ecs-init
+	$(MAKE) ecs-plan
+	$(MAKE) ecs-apply
+	$(MAKE) lb-init
+	$(MAKE) lb-plan
+	$(MAKE) lb-apply
+	@echo ">> Construyendo imagen Docker del clasificador-api..."
+	$(MAKE) build-clasificador-api-image
+	@echo ">> Haciendo login a ECR..."
+	$(MAKE) ecr-login
+	@echo ">> Subiendo imagen a ECR..."
+	$(MAKE) push-clasificador-api-image
+	@echo ">> Desplegando clasificador-api..."
+	$(MAKE) clasificador-api-init
+	$(MAKE) clasificador-api-plan
+	$(MAKE) clasificador-api-apply
+	@echo ">> Despliegue del clasificador completado."
+	@echo ">> Esperando a que el servicio esté estable..."
+	@sleep 10
+	$(MAKE) show_endpoints
+	@echo ">> Verifica el estado con: make clasificador-status"
+
+destroy-clasificador:
+	$(MAKE) clasificador-api-destroy
+
 # =========================
 # Utilidades
 # =========================
-.PHONY: show_endpoints purge-lb-enis metricas-status generador-status
+.PHONY: show_endpoints purge-lb-enis metricas-status generador-status clasificador-status
 show_endpoints:
 	@echo ">> Obteniendo DNS de los NLB..."
-	@if terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_generador_dns_name >/dev/null 2>&1; then \
-	  DNS_GEN=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_generador_dns_name 2>&1 | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r '); \
-	  DNS_MET=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_metricas_dns_name 2>&1 | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r '); \
-	  if [ -n "$$DNS_GEN" ] && [ "$$DNS_GEN" != "null" ]; then \
-	    echo ""; \
-	    echo "========================================="; \
-	    echo "  URLs de los servicios:"; \
-	    echo "========================================="; \
-	    echo "  Generador:  http://$$DNS_GEN:8000"; \
-	    echo "  Métricas:   http://$$DNS_MET:8001"; \
-	    echo ""; \
-	    echo "  Endpoints:"; \
-	    echo "  - Generador health (ECS): http://$$DNS_GEN:8000/healthz"; \
-	    echo "  - Generador health (API): http://$$DNS_GEN:8000/api/v1/health"; \
-	    echo "  - Generador generate: http://$$DNS_GEN:8000/api/v1/generate"; \
-	    echo "  - Generador docs: http://$$DNS_GEN:8000/docs"; \
-	    echo "  - Métricas health: http://$$DNS_MET:8001/healthz"; \
-	    echo "  - Métricas readability: http://$$DNS_MET:8001/metrics/readability"; \
-	    echo "  - Métricas relevance: http://$$DNS_MET:8001/metrics/relevance"; \
-	    echo "  - Métricas factuality: http://$$DNS_MET:8001/metrics/factuality"; \
-	    echo "  - Métricas loss: http://$$DNS_MET:8001/loss"; \
-	    echo "========================================="; \
-	    echo ""; \
-	  else \
-	    echo "   NLB aún no desplegado. Ejecuta: make lb-apply"; \
-	  fi; \
-	else \
+	@DNS_GEN=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_generador_dns_name 2>/dev/null | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r ' || echo ""); \
+	DNS_MET=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_metricas_dns_name 2>/dev/null | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r ' || echo ""); \
+	DNS_CLAS=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_clasificador_dns_name 2>/dev/null | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r ' || echo ""); \
+	if [ -z "$$DNS_GEN" ] || [ "$$DNS_GEN" = "null" ] || [ -z "$$DNS_MET" ] || [ "$$DNS_MET" = "null" ]; then \
 	  echo "   NLB aún no desplegado. Ejecuta: make lb-apply"; \
+	else \
+	  echo ""; \
+	  echo "================================================================"; \
+	  echo "  Endpoints de los Servicios"; \
+	  echo "================================================================"; \
+	  echo ""; \
+	  echo "  📊 GENERADOR (Puerto 8000):"; \
+	  echo "    Base URL: http://$$DNS_GEN:8000"; \
+	  echo "    - Health (ECS):     http://$$DNS_GEN:8000/healthz"; \
+	  echo "    - Health (API):     http://$$DNS_GEN:8000/api/v1/health"; \
+	  echo "    - Generate:         http://$$DNS_GEN:8000/api/v1/generate"; \
+	  echo "    - Docs:             http://$$DNS_GEN:8000/docs"; \
+	  echo ""; \
+	  echo "  📈 MÉTRICAS (Puerto 8001):"; \
+	  echo "    Base URL: http://$$DNS_MET:8001"; \
+	  echo "    - Health:           http://$$DNS_MET:8001/healthz"; \
+	  echo "    - Readability:      http://$$DNS_MET:8001/metrics/readability"; \
+	  echo "    - Relevance:       http://$$DNS_MET:8001/metrics/relevance"; \
+	  echo "    - Factuality:       http://$$DNS_MET:8001/metrics/factuality"; \
+	  echo "    - Loss:             http://$$DNS_MET:8001/loss"; \
+	  if [ -n "$$DNS_CLAS" ] && [ "$$DNS_CLAS" != "null" ]; then \
+	    echo ""; \
+	    echo "  🏷️  CLASIFICADOR (Puerto 8002):"; \
+	    echo "    Base URL: http://$$DNS_CLAS:8002"; \
+	    echo "    - Health:           http://$$DNS_CLAS:8002/api/v1/health"; \
+	    echo "    - Predict:          http://$$DNS_CLAS:8002/api/v1/predict"; \
+	    echo "    - Docs:             http://$$DNS_CLAS:8002/docs"; \
+	  fi; \
+	  echo ""; \
+	  echo "================================================================"; \
+	  echo ""; \
 	fi
 
 metricas-status:
@@ -377,20 +489,29 @@ generador-status:
 	  --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Events:events[0:3]}' \
 	  --output json | jq '.' || echo "Error al obtener el estado del servicio"
 
+clasificador-status:
+	@echo ">> Estado del servicio clasificador-api..."
+	@aws ecs describe-services \
+	  --cluster cluster_g3_MAIA \
+	  --services clasificador-api-svc \
+	  --region $(REGION) \
+	  --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Events:events[0:3]}' \
+	  --output json | jq '.' || echo "Error al obtener el estado del servicio"
+
 purge-lb-enis:
 	@echo ">> NLB no usa security groups, no hay ENIs que limpiar."
 
 # =========================
 # Shortcuts Principales
 # =========================
-.PHONY: startall destroyall redeploy-metricas redeploy-generador stop-metricas stop-generador restore-metricas restore-generador stopall restoreall
+.PHONY: startall destroyall redeploy-metricas redeploy-generador redeploy-clasificador stop-metricas stop-generador stop-clasificador restore-metricas restore-generador restore-clasificador stopall restoreall
 startall:
 	@if [ -z "$(MODEL_NAME)" ]; then \
 	  echo "ERROR: MODEL_NAME no especificado. Ejemplo: make startall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas"; \
 	  echo "       Primero ejecuta el notebook generator_app/merge_and_upload_to_s3.ipynb para hacer merge y subir a S3"; \
 	  exit 1; \
 	fi
-	@echo ">> Desplegando infraestructura completa (métricas + generador)..."
+	@echo ">> Desplegando infraestructura completa (métricas + generador + clasificador)..."
 	$(MAKE) deploy-infra
 	$(MAKE) deploy-vpc
 	$(MAKE) ecs-init
@@ -402,11 +523,13 @@ startall:
 	@echo ">> Construyendo imágenes Docker..."
 	$(MAKE) build-metricas-image
 	$(MAKE) build-generador-image MODEL_NAME=$(MODEL_NAME)
+	$(MAKE) build-clasificador-api-image
 	@echo ">> Haciendo login a ECR..."
 	$(MAKE) ecr-login
 	@echo ">> Subiendo imágenes a ECR..."
 	$(MAKE) push-metricas-image
 	$(MAKE) push-generador-image
+	$(MAKE) push-clasificador-api-image
 	@echo ">> Desplegando métricas..."
 	$(MAKE) metricas-init
 	$(MAKE) metricas-plan
@@ -417,12 +540,17 @@ startall:
 	$(MAKE) generador-init
 	$(MAKE) generador-plan
 	$(MAKE) generador-apply
+	@echo ">> Desplegando clasificador..."
+	$(MAKE) clasificador-api-init
+	$(MAKE) clasificador-api-plan
+	$(MAKE) clasificador-api-apply
 	$(MAKE) show_endpoints
 
 destroyall:
 	@echo ">> Destruyendo todos los servicios..."
 	$(MAKE) destroy-generador
 	$(MAKE) destroy-metricas
+	$(MAKE) destroy-clasificador
 	$(MAKE) lb-destroy
 	$(MAKE) ecs-destroy
 	$(MAKE) purge-lb-enis
@@ -460,6 +588,19 @@ redeploy-generador:
 	@echo ">> Redeploy iniciado. El servicio se actualizará en unos minutos."
 	@echo ">> Verifica el estado con: make generador-status"
 
+redeploy-clasificador:
+	@echo ">> Reconstruyendo imagen Docker del clasificador-api..."
+	$(MAKE) build-clasificador-api-image
+	@echo ">> Haciendo login a ECR..."
+	$(MAKE) ecr-login
+	@echo ">> Subiendo imagen a ECR..."
+	$(MAKE) push-clasificador-api-image
+	@echo ">> Forzando actualización del servicio ECS..."
+	@aws ecs update-service --cluster cluster_g3_MAIA --service clasificador-api-svc --force-new-deployment --region $(REGION) --output json | jq -r '.service | "Deployment iniciado: \(.deployments[0].id)\nEstado: \(.deployments[0].rolloutState)\nTask Definition: \(.taskDefinition)"' || \
+	  aws ecs update-service --cluster cluster_g3_MAIA --service clasificador-api-svc --force-new-deployment --region $(REGION) --output text --query 'service.serviceName' | xargs -I {} echo "Deployment iniciado para servicio: {}"
+	@echo ">> Redeploy iniciado. El servicio se actualizará en unos minutos."
+	@echo ">> Verifica el estado con: make clasificador-status"
+
 stop-metricas:
 	@echo ">> Deteniendo servicio de métricas (preservando imagen en ECR)..."
 	$(MAKE) destroy-metricas
@@ -471,6 +612,12 @@ stop-generador:
 	$(MAKE) destroy-generador
 	@echo ">> Servicio detenido. La imagen en ECR se mantiene intacta."
 	@echo ">> Para restaurar, ejecuta: make restore-generador MODEL_NAME=..."
+
+stop-clasificador:
+	@echo ">> Deteniendo servicio clasificador (preservando imagen en ECR)..."
+	$(MAKE) destroy-clasificador
+	@echo ">> Servicio detenido. La imagen en ECR se mantiene intacta."
+	@echo ">> Para restaurar, ejecuta: make restore-clasificador"
 
 restore-metricas:
 	@echo ">> Restaurando servicio de métricas desde imagen existente en ECR..."
@@ -498,12 +645,24 @@ restore-generador:
 	$(MAKE) show_endpoints
 	@echo ">> Servicio restaurado. Verifica el estado con: make generador-status"
 
+restore-clasificador:
+	@echo ">> Restaurando servicio clasificador desde imagen existente en ECR..."
+	@echo ">> Asumiendo que registry, VPC, ECS y LB ya existen..."
+	@echo ">> NO se reconstruirá ni se empujará la imagen (usando imagen existente en ECR)..."
+	$(MAKE) clasificador-api-init
+	$(MAKE) clasificador-api-plan
+	$(MAKE) clasificador-api-apply
+	$(MAKE) show_endpoints
+	@echo ">> Servicio restaurado. Verifica el estado con: make clasificador-status"
+
 stopall:
 	@echo ">> Deteniendo todos los servicios, load balancers y cluster ECS (preservando imágenes en ECR)..."
 	@echo ">> Deteniendo servicio de métricas..."
 	$(MAKE) destroy-metricas
 	@echo ">> Deteniendo servicio generador..."
 	$(MAKE) destroy-generador
+	@echo ">> Deteniendo servicio clasificador..."
+	$(MAKE) destroy-clasificador
 	@echo ">> Destruyendo load balancers (NLB)..."
 	$(MAKE) lb-destroy
 	@echo ">> Destruyendo cluster ECS..."
@@ -525,7 +684,7 @@ restoreall:
 	$(MAKE) ecs-init
 	$(MAKE) ecs-plan
 	$(MAKE) ecs-apply
-	@echo ">> Recreando load balancers (NLB)..."
+	@echo ">> Recreando load balancers (NLB + ALB)..."
 	$(MAKE) lb-init
 	$(MAKE) lb-plan
 	$(MAKE) lb-apply
@@ -539,7 +698,11 @@ restoreall:
 	$(MAKE) generador-init
 	$(MAKE) generador-plan
 	$(MAKE) generador-apply
+	@echo ">> Restaurando clasificador..."
+	$(MAKE) clasificador-api-init
+	$(MAKE) clasificador-api-plan
+	$(MAKE) clasificador-api-apply
 	@echo ">> Mostrando URLs de los servicios..."
 	$(MAKE) show_endpoints
 	@echo ">> Todos los servicios, load balancers y cluster ECS restaurados."
-	@echo ">> Verifica el estado con: make metricas-status y make generador-status"
+	@echo ">> Verifica el estado con: make metricas-status, make generador-status, make clasificador-status"

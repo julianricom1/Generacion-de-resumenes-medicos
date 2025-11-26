@@ -1,20 +1,26 @@
-# Outputs para generador (puerto 8000)
-output "nlb_generador_arn"          { value = module.nlb_generador.nlb_arn }
-output "nlb_generador_dns_name"     { value = module.nlb_generador.nlb_dns_name }
-output "nlb_generador_target_group_arn" { value = module.nlb_generador.target_group_arn }
-output "nlb_generador_listener_arn"     { value = module.nlb_generador.listener_arn }
+# Outputs para generador (puerto 8000) - usando NLB compartido
+output "nlb_generador_arn"          { value = aws_lb.shared_nlb.arn }
+output "nlb_generador_dns_name"     { value = aws_lb.shared_nlb.dns_name }
+output "nlb_generador_target_group_arn" { value = aws_lb_target_group.generador.arn }
+output "nlb_generador_listener_arn"     { value = aws_lb_listener.generador.arn }
 
-# Outputs para métricas (puerto 8001)
-output "nlb_metricas_arn"          { value = module.nlb_metricas.nlb_arn }
-output "nlb_metricas_dns_name"     { value = module.nlb_metricas.nlb_dns_name }
-output "nlb_metricas_target_group_arn" { value = module.nlb_metricas.target_group_arn }
-output "nlb_metricas_listener_arn"     { value = module.nlb_metricas.listener_arn }
+# Outputs para métricas (puerto 8001) - usando NLB compartido
+output "nlb_metricas_arn"          { value = aws_lb.shared_nlb.arn }
+output "nlb_metricas_dns_name"     { value = aws_lb.shared_nlb.dns_name }
+output "nlb_metricas_target_group_arn" { value = aws_lb_target_group.metricas.arn }
+output "nlb_metricas_listener_arn"     { value = aws_lb_listener.metricas.arn }
 
-# Outputs legacy (para compatibilidad)
-output "alb_arn"          { value = module.nlb_generador.nlb_arn }
-output "alb_dns_name"     { value = module.nlb_generador.nlb_dns_name }
+# Outputs para clasificador-api (puerto 8002) - usando NLB compartido
+output "nlb_clasificador_arn"          { value = aws_lb.shared_nlb.arn }
+output "nlb_clasificador_dns_name"     { value = aws_lb.shared_nlb.dns_name }
+output "nlb_clasificador_target_group_arn" { value = aws_lb_target_group.clasificador.arn }
+output "nlb_clasificador_listener_arn"     { value = aws_lb_listener.clasificador.arn }
+
+# Outputs legacy (para compatibilidad con web stack que puede necesitar ALB)
+output "alb_arn"          { value = aws_lb.shared_nlb.arn }
+output "alb_dns_name"     { value = aws_lb.shared_nlb.dns_name }
 output "alb_sg_id"        { value = "" }  # NLB no usa security groups
-output "target_group_arn" { value = module.nlb_metricas.target_group_arn }
-output "listener_arn"     { value = module.nlb_generador.listener_arn }
-output "dns_name"         { value = module.nlb_generador.dns_name }
-output "alb_dns"          { value = module.nlb_generador.dns_name }
+output "target_group_arn" { value = aws_lb_target_group.metricas.arn }
+output "listener_arn"     { value = aws_lb_listener.generador.arn }
+output "dns_name"         { value = aws_lb.shared_nlb.dns_name }
+output "alb_dns"          { value = aws_lb.shared_nlb.dns_name }

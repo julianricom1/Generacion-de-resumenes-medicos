@@ -39,7 +39,7 @@ def index(request: Request) -> Any:
 app.include_router(api_router, prefix=settings.API_V1_STR)
 app.include_router(root_router)
 
-# Health check endpoint para ECS (compatible con gen_app.py)
+# Health check endpoint para ECS (en la raíz, sin prefijo)
 @app.get("/healthz")
 async def healthz():
     """Health check endpoint para ECS"""
