@@ -62,7 +62,7 @@ function useMetrics({ text, doCall = false }) {
   };
   const getCategory = readability => {
     console.log('Readability:', readability);
-    if (readability >= 15 && readability <= 18) {
+    if (readability >= 15) {
       setCategory('Postgrado');
     } else if (readability >= 12 && readability < 15) {
       setCategory('Pregrado');
