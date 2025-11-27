@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import {TextField, Button, Box, Typography, Card, CardContent, Grid, CircularProgress, Backdrop, FormControl, InputLabel, Select, MenuItem } from '@mui/material';
+import {TextField, Button, Box, Typography, Card, CardContent, Grid, CircularProgress, Backdrop, FormControl, InputLabel, Select, MenuItem, Alert } from '@mui/material';
 import useGeneration from '../../hooks/useGeneration';
 import useReadability from '../../hooks/useReadability';
 import useClassification from '../../hooks/useClassification';
@@ -14,7 +14,7 @@ function GeneratePage() {
   const [selectedModel, setSelectedModel] = useState(SupportedModels.OLLAMA_FINNED_TUNNED);
 
   //Se clasifica texto de entrada y su legibilidad
-  const { result:classification, metadata } = useClassification({inputText,doCall});
+  const { result:classification, metadata, error: error_classification } = useClassification({inputText,doCall});
   const { loading: loading_readability, error: error_readability, readability, category: originalTextCategory } = useReadability({ text: inputText, doCall });
 
   // Generacion de texto y calculo de metricas
@@ -36,10 +36,10 @@ function GeneratePage() {
   }, [result, doCall]);
 
   useEffect(() => {
-    if (error) {
+    if (error || error_readability || error_classification) {
       setDoCall(false); // Reset doCall if there's an error
     }
-  }, [error]);
+  }, [error, error_readability, error_classification]);
 
   useEffect(() => {
     if (readability_generated || error_readability_generated) {
@@ -83,6 +83,32 @@ function GeneratePage() {
           {(loading) ? 'Generando texto...' : loading_readability_generated ? 'Calculando métricas...' : 'Cargando...'}
         </Typography>
       </Backdrop>
+
+      {/* Error Messages */}
+      {(error || error_readability || error_classification || error_readability_generated) && (
+        <Box sx={{ mb: 3 }}>
+          {error_classification && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              <strong>Error en clasificación</strong> {error_classification}
+            </Alert>
+          )}
+          {error_readability && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              <strong>Error en métricas de legibilidad</strong> {error_readability}
+            </Alert>
+          )}
+          {error && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              <strong>Error en generación de texto</strong> {error}
+            </Alert>
+          )}
+          {error_readability_generated && (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              <strong>Error en métricas del texto generado</strong> {error_readability_generated}
+            </Alert>
+          )}
+        </Box>
+      )}
 
       <Grid container spacing={2} alignItems="center">
         <Grid size={6}>

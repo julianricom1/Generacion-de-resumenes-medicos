@@ -4,6 +4,7 @@ import axios from 'axios';
 function useClassification({ inputText, doCall = false }) {
   const [result, setResult] = useState(null);
   const [metadata, setMetadata] = useState({});
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     // Example effect: fetch initial data or perform setup
@@ -30,11 +31,12 @@ function useClassification({ inputText, doCall = false }) {
       });
       setMetadata(response.data.metadata);
     } catch (error) {
+      setError(true);
       console.error('Error fetching prediction:', error);
     }
   };
 
-  return { result, metadata };
+  return { result, metadata, error };
 }
 
 export default useClassification;
