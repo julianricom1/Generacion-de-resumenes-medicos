@@ -445,7 +445,7 @@ make redeploy-web
 make stopall
 
 # Restaurar todos los servicios ECS (usa NLB y cluster existentes)
-# NOTA: El web requiere que la imagen en ECR haya sido construida con los endpoints correctos
+# NOTA: Web requiere que la imagen en ECR haya sido construida con los endpoints correctos
 make restoreall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
 ```
 
@@ -469,7 +469,7 @@ env_vars = {
   MODEL_NAME = "meta-llama__Llama-3.2-3B-Instruct-6_epocas"
   DEVICE = "cpu"
   MAX_NEW_TOKENS = "512"   # Máximo de tokens a generar
-  TEMPERATURE = "0.2"      # Temperatura para sampling (0.0-2.0, menor = más determinista)
+  TEMPERATURE = "0.2"      # Temperatura para sampling 
   TOP_P = "0.9"
   REPEAT_PENALTY = "1.015"
 }
@@ -618,10 +618,6 @@ curl -X POST http://<nlb-dns>:8000/api/v1/generate \
   }'
 ```
 
-**Documentación interactiva:**
-```
-http://<nlb-dns>:8000/docs
-```
 
 #### Servicio Clasificador (Puerto 8002)
 
@@ -661,22 +657,3 @@ curl -X POST http://<nlb-dns>:8002/api/v1/predict \
 }
 ```
 
-**Documentación interactiva:**
-```
-http://<nlb-dns>:8002/docs
-```
-
-#### Servicio Web (Puerto 80)
-
-**Acceso a la aplicación:**
-```
-http://<nlb-dns>:80
-```
-
-**Rutas disponibles:**
-- `/` - Redirige a la página de generación
-- `/generar` - Página de generación de resúmenes
-- `/texto` - Página de clasificación por texto directo
-- `/archivo` - Página de clasificación por archivo CSV
-
-**Nota:** Reemplaza `<nlb-dns>` con el DNS name del NLB obtenido mediante `make show_endpoints`.
