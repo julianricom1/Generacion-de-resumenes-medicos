@@ -16,6 +16,12 @@ output "nlb_clasificador_dns_name"     { value = aws_lb.shared_nlb.dns_name }
 output "nlb_clasificador_target_group_arn" { value = aws_lb_target_group.clasificador.arn }
 output "nlb_clasificador_listener_arn"     { value = aws_lb_listener.clasificador.arn }
 
+# Outputs para web (puerto 80) - usando NLB compartido
+output "nlb_web_arn"          { value = aws_lb.shared_nlb.arn }
+output "nlb_web_dns_name"     { value = aws_lb.shared_nlb.dns_name }
+output "nlb_web_target_group_arn" { value = aws_lb_target_group.web.arn }
+output "nlb_web_listener_arn"     { value = aws_lb_listener.web.arn }
+
 # Outputs legacy (para compatibilidad con web stack que puede necesitar ALB)
 output "alb_arn"          { value = aws_lb.shared_nlb.arn }
 output "alb_dns_name"     { value = aws_lb.shared_nlb.dns_name }

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MODEL_S3_BUCKET="${MODEL_S3_BUCKET:-modelo-generador-maia-g8}"
+MODEL_S3_BUCKET="${MODEL_S3_BUCKET:-modelo-generador-maia-g3}"
 MODEL_S3_KEY="merged-models/${MODEL_NAME}"
 
 if [ -z "$MODEL_NAME" ]; then

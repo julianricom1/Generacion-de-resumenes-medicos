@@ -137,3 +137,39 @@ resource "aws_lb_listener" "clasificador" {
     target_group_arn = aws_lb_target_group.clasificador.arn
   }
 }
+
+# Target Group para web (puerto 80)
+resource "aws_lb_target_group" "web" {
+  name        = "${var.alb_name}-web-tg"
+  port        = 80
+  protocol    = "TCP"
+  vpc_id      = data.terraform_remote_state.vpc.outputs.vpc_id
+  target_type = "ip"
+
+  health_check {
+    protocol            = "TCP"
+    port                = "traffic-port"
+    interval            = 30
+    timeout             = 10
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+  }
+
+  deregistration_delay = 30
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Listener para web (puerto 80)
+resource "aws_lb_listener" "web" {
+  load_balancer_arn = aws_lb.shared_nlb.arn
+  port              = 80
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.web.arn
+  }
+}

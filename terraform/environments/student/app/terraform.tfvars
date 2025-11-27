@@ -1,5 +1,5 @@
 region         = "us-east-1"
-backend_bucket = "infrastructura-maia-g8"
+backend_bucket = "infrastructura-maia-g3"
 
 service_name   = "metricas"
 image          = "metricas-api:latest"

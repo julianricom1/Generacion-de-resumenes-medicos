@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-MODEL_S3_BUCKET="${MODEL_S3_BUCKET:-modelo-factualidad}"
+MODEL_S3_BUCKET="${MODEL_S3_BUCKET:-modelo-factualidad-g3}"
 MODEL_S3_KEY="AlignScore-base.ckpt"
 MODEL_LOCAL_PATH="/models/AlignScore-base.ckpt"
 

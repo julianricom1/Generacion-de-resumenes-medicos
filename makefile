@@ -4,7 +4,7 @@
 CURDIR            ?= $(shell pwd)
 TERRAFORM_ENV     ?= student
 REGION            ?= us-east-1
-TF_BACKEND_BUCKET ?= infrastructura-maia-g8
+TF_BACKEND_BUCKET ?= infrastructura-maia-g3
 ACCOUNT_ID        ?= $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null)
 
 # ================
@@ -39,8 +39,8 @@ tf-backend-bucket:
 
 tf-backend-bucket-delete:
 	@echo ">> Eliminando objetos versionados en s3://$(TF_BACKEND_BUCKET)"
-	@if [ "$(TF_BACKEND_BUCKET)" = "infrastructura-maia-g8" ]; then \
-	  echo "   WARNING: El bucket 'infrastructura-maia-g8' está protegido y NO será eliminado."; \
+	@if [ "$(TF_BACKEND_BUCKET)" = "infrastructura-maia-g3" ]; then \
+	  echo "   WARNING: El bucket 'infrastructura-maia-g3' está protegido y NO será eliminado."; \
 	  echo "   Solo se eliminarán los objetos dentro del bucket."; \
 	  aws s3api list-object-versions --bucket $(TF_BACKEND_BUCKET) --output json | \
 	    jq -r '.Versions[]?, .DeleteMarkers[]? | {Key:.Key, VersionId:.VersionId} | @json' | \
@@ -106,7 +106,7 @@ registry-destroy:
 # =========================
 # Docker Image
 # =========================
-.PHONY: build-metricas-image build-generador-image build-clasificador-api-image ecr-login push-metricas-image push-generador-image push-clasificador-api-image
+.PHONY: build-metricas-image build-generador-image build-clasificador-api-image build-web-image ecr-login push-metricas-image push-generador-image push-clasificador-api-image push-web-image
 build-metricas-image:
 	DOCKER_BUILDKIT=0 docker build --rm --platform linux/amd64 --no-cache -f metricas/Dockerfile -t metricas-api:latest ./metricas
 
@@ -117,8 +117,8 @@ build-generador-image:
 	  exit 1; \
 	fi
 	@echo ">> Verificando que el modelo mergeado existe en S3..."
-	@aws s3 ls s3://modelo-generador-maia-g8/merged-models/$(MODEL_NAME)/config.json --region $(REGION) >/dev/null 2>&1 || { \
-	  echo "ERROR: El modelo mergeado no se encuentra en S3: s3://modelo-generador-maia-g8/merged-models/$(MODEL_NAME)/"; \
+	@aws s3 ls s3://modelo-generador-maia-g3/merged-models/$(MODEL_NAME)/config.json --region $(REGION) >/dev/null 2>&1 || { \
+	  echo "ERROR: El modelo mergeado no se encuentra en S3: s3://modelo-generador-maia-g3/merged-models/$(MODEL_NAME)/"; \
 	  echo "       Primero ejecuta el notebook generator_app/merge_and_upload_to_s3.ipynb para hacer merge y subir a S3"; \
 	  exit 1; \
 	}
@@ -163,6 +163,49 @@ build-clasificador-api-image:
 	  -t clasificador-api:latest \
 	  .
 	@echo ">> Build del clasificador-api completado exitosamente"
+
+build-web-image:
+	@echo ">> Extrayendo endpoints de los servicios backend..."
+	@DNS_GEN=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_generador_dns_name 2>/dev/null | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r ' || echo ""); \
+	DNS_MET=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_metricas_dns_name 2>/dev/null | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r ' || echo ""); \
+	DNS_CLAS=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_clasificador_dns_name 2>/dev/null | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r ' || echo ""); \
+	if [ -z "$$DNS_GEN" ] || [ "$$DNS_GEN" = "null" ] || [ -z "$$DNS_MET" ] || [ "$$DNS_MET" = "null" ] || [ -z "$$DNS_CLAS" ] || [ "$$DNS_CLAS" = "null" ]; then \
+	  echo "ERROR: Los servicios backend no están desplegados. Ejecuta primero:"; \
+	  echo "  make deploy-metricas"; \
+	  echo "  make deploy-generador MODEL_NAME=..."; \
+	  echo "  make deploy-clasificador"; \
+	  echo "  make show_endpoints"; \
+	  exit 1; \
+	fi; \
+	VITE_GENERATION_DOMAIN="http://$$DNS_GEN:8000"; \
+	VITE_METRICS_DOMAIN="http://$$DNS_MET:8001"; \
+	VITE_CLASSIFICATION_DOMAIN="http://$$DNS_CLAS:8002"; \
+	echo ">> Endpoints extraídos:"; \
+	echo "  VITE_GENERATION_DOMAIN=$$VITE_GENERATION_DOMAIN"; \
+	echo "  VITE_METRICS_DOMAIN=$$VITE_METRICS_DOMAIN"; \
+	echo "  VITE_CLASSIFICATION_DOMAIN=$$VITE_CLASSIFICATION_DOMAIN"; \
+	echo ">> Construyendo imagen Docker del web (React + Vite)..."; \
+	echo ">> Esto puede tardar varios minutos (instalación de dependencias Node.js y build)..."; \
+	docker build --rm --platform linux/amd64 --no-cache \
+	  --build-arg VITE_GENERATION_DOMAIN="$$VITE_GENERATION_DOMAIN" \
+	  --build-arg VITE_METRICS_DOMAIN="$$VITE_METRICS_DOMAIN" \
+	  --build-arg VITE_CLASSIFICATION_DOMAIN="$$VITE_CLASSIFICATION_DOMAIN" \
+	  -f web/Dockerfile \
+	  -t web:latest \
+	  .
+	@echo ">> Build del web completado exitosamente"
+
+push-web-image:
+	@echo ">> Verificando que el repositorio ECR 'web' existe..."
+	@aws ecr describe-repositories --repository-names web --region $(REGION) >/dev/null 2>&1 || { \
+	  echo "ERROR: El repositorio ECR 'web' no existe. Ejecuta 'make deploy-infra' primero."; \
+	  exit 1; \
+	}
+	@echo ">> Etiquetando imagen para ECR..."
+	docker tag "web:latest" "$(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/web:latest"
+	@echo ">> Subiendo imagen a ECR..."
+	docker push "$(ACCOUNT_ID).dkr.ecr.$(REGION).amazonaws.com/web:latest"
+	@echo ">> Imagen del web subida exitosamente a ECR"
 
 # =========================
 # Terraform Stacks
@@ -215,24 +258,34 @@ lb-plan:
 	$(MAKE) tfplan STACK=alb TERRAFORM_ENV=$(TERRAFORM_ENV)
 lb-apply:
 	@if [ ! -d "terraform/stacks/alb/.terraform" ]; then $(MAKE) lb-init; fi
-	@echo ">> Verificando target groups existentes (NLB)..."; \
+	@echo ">> Verificando target groups existentes (NLB compartido)..."; \
 	TG_GEN_ARN=$$(aws elbv2 describe-target-groups --names metricas-nlb-generador-tg --region $(REGION) --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null | grep -v "^None$$" || true); \
 	TG_MET_ARN=$$(aws elbv2 describe-target-groups --names metricas-nlb-metricas-tg --region $(REGION) --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null | grep -v "^None$$" || true); \
+	TG_CLAS_ARN=$$(aws elbv2 describe-target-groups --names metricas-nlb-clasificador-tg --region $(REGION) --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null | grep -v "^None$$" || true); \
 	if [ -n "$$TG_GEN_ARN" ] && [ "$$TG_GEN_ARN" != "None" ]; then \
 	  echo ">> Target group 'metricas-nlb-generador-tg' encontrado: $$TG_GEN_ARN"; \
-	  if ! terraform -chdir="terraform/stacks/alb" state show module.nlb_generador.aws_lb_target_group.this >/dev/null 2>&1; then \
+	  if ! terraform -chdir="terraform/stacks/alb" state show aws_lb_target_group.generador >/dev/null 2>&1; then \
 	    echo ">> Importando target group generador a Terraform..."; \
 	    cd terraform/stacks/alb && \
-	    terraform import -var-file="../../environments/student/alb/terraform.tfvars" module.nlb_generador.aws_lb_target_group.this $$TG_GEN_ARN 2>&1 | grep -v "Warning:" || echo ">> Import completado (o ya estaba importado)"; \
+	    terraform import -var-file="../../environments/student/alb/terraform.tfvars" aws_lb_target_group.generador $$TG_GEN_ARN 2>&1 | grep -v "Warning:" || echo ">> Import completado (o ya estaba importado)"; \
 	    cd ../../..; \
 	  fi; \
 	fi; \
 	if [ -n "$$TG_MET_ARN" ] && [ "$$TG_MET_ARN" != "None" ]; then \
 	  echo ">> Target group 'metricas-nlb-metricas-tg' encontrado: $$TG_MET_ARN"; \
-	  if ! terraform -chdir="terraform/stacks/alb" state show module.nlb_metricas.aws_lb_target_group.this >/dev/null 2>&1; then \
+	  if ! terraform -chdir="terraform/stacks/alb" state show aws_lb_target_group.metricas >/dev/null 2>&1; then \
 	    echo ">> Importando target group métricas a Terraform..."; \
 	    cd terraform/stacks/alb && \
-	    terraform import -var-file="../../environments/student/alb/terraform.tfvars" module.nlb_metricas.aws_lb_target_group.this $$TG_MET_ARN 2>&1 | grep -v "Warning:" || echo ">> Import completado (o ya estaba importado)"; \
+	    terraform import -var-file="../../environments/student/alb/terraform.tfvars" aws_lb_target_group.metricas $$TG_MET_ARN 2>&1 | grep -v "Warning:" || echo ">> Import completado (o ya estaba importado)"; \
+	    cd ../../..; \
+	  fi; \
+	fi; \
+	if [ -n "$$TG_CLAS_ARN" ] && [ "$$TG_CLAS_ARN" != "None" ]; then \
+	  echo ">> Target group 'metricas-nlb-clasificador-tg' encontrado: $$TG_CLAS_ARN"; \
+	  if ! terraform -chdir="terraform/stacks/alb" state show aws_lb_target_group.clasificador >/dev/null 2>&1; then \
+	    echo ">> Importando target group clasificador a Terraform..."; \
+	    cd terraform/stacks/alb && \
+	    terraform import -var-file="../../environments/student/alb/terraform.tfvars" aws_lb_target_group.clasificador $$TG_CLAS_ARN 2>&1 | grep -v "Warning:" || echo ">> Import completado (o ya estaba importado)"; \
 	    cd ../../..; \
 	  fi; \
 	fi
@@ -326,6 +379,63 @@ web-destroy:
 	@rm -f terraform/stacks/web/.terraform.lock.hcl
 	$(MAKE) web-init
 	$(MAKE) tfdestroy STACK=web TERRAFORM_ENV=$(TERRAFORM_ENV)
+
+destroy-web:
+	@echo ">> Destruyendo servicio web..."
+	$(MAKE) web-destroy
+	@echo ">> Servicio web destruido"
+
+deploy-web:
+	@echo ">> Desplegando web (infraestructura completa)..."
+	@echo ">> Verificando que los servicios backend estén desplegados..."
+	@DNS_GEN=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_generador_dns_name 2>/dev/null | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r ' || echo ""); \
+	DNS_MET=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_metricas_dns_name 2>/dev/null | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r ' || echo ""); \
+	DNS_CLAS=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_clasificador_dns_name 2>/dev/null | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r ' || echo ""); \
+	if [ -z "$$DNS_GEN" ] || [ "$$DNS_GEN" = "null" ] || [ -z "$$DNS_MET" ] || [ "$$DNS_MET" = "null" ] || [ -z "$$DNS_CLAS" ] || [ "$$DNS_CLAS" = "null" ]; then \
+	  echo "ERROR: Los servicios backend no están desplegados. Ejecuta primero:"; \
+	  echo "  make deploy-metricas"; \
+	  echo "  make deploy-generador MODEL_NAME=..."; \
+	  echo "  make deploy-clasificador"; \
+	  exit 1; \
+	fi; \
+	echo ">> Servicios backend verificados. Continuando con el despliegue del web..."; \
+	$(MAKE) deploy-infra; \
+	$(MAKE) deploy-vpc; \
+	$(MAKE) ecs-init; \
+	$(MAKE) ecs-plan; \
+	$(MAKE) ecs-apply; \
+	$(MAKE) lb-init; \
+	$(MAKE) lb-plan; \
+	$(MAKE) lb-apply; \
+	echo ">> Construyendo imagen Docker del web con endpoints dinámicos..."; \
+	$(MAKE) build-web-image; \
+	echo ">> Haciendo login a ECR..."; \
+	$(MAKE) ecr-login; \
+	echo ">> Subiendo imagen a ECR..."; \
+	$(MAKE) push-web-image; \
+	echo ">> Desplegando web..."; \
+	$(MAKE) web-init; \
+	$(MAKE) web-plan; \
+	$(MAKE) web-apply; \
+	echo ">> Despliegue del web completado."; \
+	echo ">> Esperando a que el servicio esté estable..."; \
+	@sleep 10; \
+	$(MAKE) show_endpoints; \
+	@echo ">> Verifica el estado con: make web-status"
+
+destroy-web:
+	@echo ">> Destruyendo servicio web..."
+	$(MAKE) web-destroy
+	@echo ">> Servicio web destruido"
+
+web-status:
+	@echo ">> Estado del servicio web..."
+	@aws ecs describe-services \
+	  --cluster cluster_g3_MAIA \
+	  --services web-svc \
+	  --region $(REGION) \
+	  --query 'services[0].{ServiceName:serviceName,Status:status,DesiredCount:desiredCount,RunningCount:runningCount,PendingCount:pendingCount,TaskDefinition:taskDefinition}' \
+	  --output table || echo "Servicio no encontrado o error al consultar"
 
 # =========================
 # Orquestación
@@ -430,9 +540,9 @@ destroy-clasificador:
 # =========================
 # Utilidades
 # =========================
-.PHONY: show_endpoints purge-lb-enis metricas-status generador-status clasificador-status
+.PHONY: show_endpoints purge-lb-enis metricas-status generador-status clasificador-status web-status
 show_endpoints:
-	@echo ">> Obteniendo DNS de los NLB..."
+	@echo ">> Obteniendo las direcciones de los servicios..."
 	@DNS_GEN=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_generador_dns_name 2>/dev/null | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r ' || echo ""); \
 	DNS_MET=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_metricas_dns_name 2>/dev/null | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r ' || echo ""); \
 	DNS_CLAS=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_clasificador_dns_name 2>/dev/null | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r ' || echo ""); \
@@ -441,17 +551,19 @@ show_endpoints:
 	else \
 	  echo ""; \
 	  echo "================================================================"; \
-	  echo "  Endpoints de los Servicios"; \
+	  echo "  Endpoints de los Servicios Disponibles"; \
 	  echo "================================================================"; \
 	  echo ""; \
-	  echo "  📊 GENERADOR (Puerto 8000):"; \
+	  echo "  Nota: Todos los servicios usan el mismo NLB con diferentes puertos"; \
+	  echo ""; \
+	  echo "    GENERADOR (Puerto 8000):"; \
 	  echo "    Base URL: http://$$DNS_GEN:8000"; \
 	  echo "    - Health (ECS):     http://$$DNS_GEN:8000/healthz"; \
 	  echo "    - Health (API):     http://$$DNS_GEN:8000/api/v1/health"; \
 	  echo "    - Generate:         http://$$DNS_GEN:8000/api/v1/generate"; \
 	  echo "    - Docs:             http://$$DNS_GEN:8000/docs"; \
 	  echo ""; \
-	  echo "  📈 MÉTRICAS (Puerto 8001):"; \
+	  echo "    MÉTRICAS (Puerto 8001):"; \
 	  echo "    Base URL: http://$$DNS_MET:8001"; \
 	  echo "    - Health:           http://$$DNS_MET:8001/healthz"; \
 	  echo "    - Readability:      http://$$DNS_MET:8001/metrics/readability"; \
@@ -460,11 +572,18 @@ show_endpoints:
 	  echo "    - Loss:             http://$$DNS_MET:8001/loss"; \
 	  if [ -n "$$DNS_CLAS" ] && [ "$$DNS_CLAS" != "null" ]; then \
 	    echo ""; \
-	    echo "  🏷️  CLASIFICADOR (Puerto 8002):"; \
+	    echo "    CLASIFICADOR (Puerto 8002):"; \
 	    echo "    Base URL: http://$$DNS_CLAS:8002"; \
 	    echo "    - Health:           http://$$DNS_CLAS:8002/api/v1/health"; \
 	    echo "    - Predict:          http://$$DNS_CLAS:8002/api/v1/predict"; \
 	    echo "    - Docs:             http://$$DNS_CLAS:8002/docs"; \
+	  fi; \
+	  DNS_WEB=$$(terraform -chdir="$(CURDIR)/terraform/stacks/alb" output -raw nlb_web_dns_name 2>/dev/null | grep -v "^Warning:" | grep -v "^│" | tr -d '\n\r ' || echo ""); \
+	  if [ -n "$$DNS_WEB" ] && [ "$$DNS_WEB" != "null" ]; then \
+	    echo ""; \
+	    echo "    WEB (Puerto 80):"; \
+	    echo "    Base URL: http://$$DNS_WEB:80"; \
+	    echo "    - Aplicación web:   http://$$DNS_WEB:80"; \
 	  fi; \
 	  echo ""; \
 	  echo "================================================================"; \
@@ -504,7 +623,7 @@ purge-lb-enis:
 # =========================
 # Shortcuts Principales
 # =========================
-.PHONY: startall destroyall redeploy-metricas redeploy-generador redeploy-clasificador stop-metricas stop-generador stop-clasificador restore-metricas restore-generador restore-clasificador stopall restoreall
+.PHONY: startall destroyall redeploy-metricas redeploy-generador redeploy-clasificador redeploy-web stop-metricas stop-generador stop-clasificador stop-web restore-metricas restore-generador restore-clasificador restore-web stopall restoreall
 startall:
 	@if [ -z "$(MODEL_NAME)" ]; then \
 	  echo "ERROR: MODEL_NAME no especificado. Ejemplo: make startall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas"; \
@@ -544,6 +663,12 @@ startall:
 	$(MAKE) clasificador-api-init
 	$(MAKE) clasificador-api-plan
 	$(MAKE) clasificador-api-apply
+	@echo ">> Desplegando web (requiere que los backends estén online)..."
+	$(MAKE) build-web-image
+	$(MAKE) push-web-image
+	$(MAKE) web-init
+	$(MAKE) web-plan
+	$(MAKE) web-apply
 	$(MAKE) show_endpoints
 
 destroyall:
@@ -551,6 +676,7 @@ destroyall:
 	$(MAKE) destroy-generador
 	$(MAKE) destroy-metricas
 	$(MAKE) destroy-clasificador
+	$(MAKE) destroy-web
 	$(MAKE) lb-destroy
 	$(MAKE) ecs-destroy
 	$(MAKE) purge-lb-enis
@@ -600,6 +726,19 @@ redeploy-clasificador:
 	  aws ecs update-service --cluster cluster_g3_MAIA --service clasificador-api-svc --force-new-deployment --region $(REGION) --output text --query 'service.serviceName' | xargs -I {} echo "Deployment iniciado para servicio: {}"
 	@echo ">> Redeploy iniciado. El servicio se actualizará en unos minutos."
 	@echo ">> Verifica el estado con: make clasificador-status"
+
+redeploy-web:
+	@echo ">> Reconstruyendo imagen Docker del web con endpoints actualizados..."
+	$(MAKE) build-web-image
+	@echo ">> Haciendo login a ECR..."
+	$(MAKE) ecr-login
+	@echo ">> Subiendo imagen a ECR..."
+	$(MAKE) push-web-image
+	@echo ">> Forzando actualización del servicio ECS..."
+	@aws ecs update-service --cluster cluster_g3_MAIA --service web-svc --force-new-deployment --region $(REGION) --output json | jq -r '.service | "Deployment iniciado: \(.deployments[0].id)\nEstado: \(.deployments[0].rolloutState)\nTask Definition: \(.taskDefinition)"' || \
+	  aws ecs update-service --cluster cluster_g3_MAIA --service web-svc --force-new-deployment --region $(REGION) --output text --query 'service.serviceName' | xargs -I {} echo "Deployment iniciado para servicio: {}"
+	@echo ">> Redeploy iniciado. El servicio se actualizará en unos minutos."
+	@echo ">> Verifica el estado con: make web-status"
 
 stop-metricas:
 	@echo ">> Deteniendo servicio de métricas (preservando imagen en ECR)..."
@@ -655,19 +794,38 @@ restore-clasificador:
 	$(MAKE) show_endpoints
 	@echo ">> Servicio restaurado. Verifica el estado con: make clasificador-status"
 
+stop-web:
+	@echo ">> Deteniendo servicio web (preservando imagen en ECR)..."
+	$(MAKE) destroy-web
+	@echo ">> Servicio detenido. La imagen en ECR se mantiene intacta."
+	@echo ">> Para restaurar, ejecuta: make restore-web"
+
+restore-web:
+	@echo ">> Restaurando servicio web desde imagen existente en ECR..."
+	@echo ">> Asumiendo que registry, VPC, ECS y LB ya existen..."
+	@echo ">> NO se reconstruirá ni se empujará la imagen (usando imagen existente en ECR)..."
+	@echo ">> NOTA: La imagen debe haber sido construida con los endpoints correctos..."
+	$(MAKE) web-init
+	$(MAKE) web-plan
+	$(MAKE) web-apply
+	$(MAKE) show_endpoints
+	@echo ">> Servicio restaurado. Verifica el estado con: make web-status"
+
 stopall:
-	@echo ">> Deteniendo todos los servicios, load balancers y cluster ECS (preservando imágenes en ECR)..."
+	@echo ">> Deteniendo todos los servicios, load balancer y cluster ECS (preservando imágenes en ECR)..."
 	@echo ">> Deteniendo servicio de métricas..."
 	$(MAKE) destroy-metricas
 	@echo ">> Deteniendo servicio generador..."
 	$(MAKE) destroy-generador
 	@echo ">> Deteniendo servicio clasificador..."
 	$(MAKE) destroy-clasificador
-	@echo ">> Destruyendo load balancers (NLB)..."
+	@echo ">> Deteniendo servicio web..."
+	$(MAKE) destroy-web
+	@echo ">> Destruyendo load balancer (NLB compartido)..."
 	$(MAKE) lb-destroy
 	@echo ">> Destruyendo cluster ECS..."
 	$(MAKE) ecs-destroy
-	@echo ">> Todos los servicios, load balancers y cluster ECS detenidos."
+	@echo ">> Todos los servicios, load balancer y cluster ECS detenidos."
 	@echo ">> ECS está ahora vacío."
 	@echo ">> Las imágenes en ECR se mantienen intactas."
 	@echo ">> Para restaurar todo, ejecuta: make restoreall MODEL_NAME=..."
@@ -677,14 +835,14 @@ restoreall:
 	  echo "ERROR: MODEL_NAME no especificado. Ejemplo: make restoreall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas"; \
 	  exit 1; \
 	fi
-	@echo ">> Restaurando toda la infraestructura (cluster ECS + servicios + load balancers)..."
+	@echo ">> Restaurando toda la infraestructura (cluster ECS + servicios + load balancer)..."
 	@echo ">> Asumiendo que registry y VPC ya existen..."
 	@echo ">> NO se reconstruirán ni se empujarán las imágenes (usando imágenes existentes en ECR)..."
 	@echo ">> Recreando cluster ECS..."
 	$(MAKE) ecs-init
 	$(MAKE) ecs-plan
 	$(MAKE) ecs-apply
-	@echo ">> Recreando load balancers (NLB + ALB)..."
+	@echo ">> Recreando load balancer (NLB compartido)..."
 	$(MAKE) lb-init
 	$(MAKE) lb-plan
 	$(MAKE) lb-apply
@@ -698,11 +856,17 @@ restoreall:
 	$(MAKE) generador-init
 	$(MAKE) generador-plan
 	$(MAKE) generador-apply
-	@echo ">> Restaurando clasificador..."
+	@echo ">> Restaurando servicio clasificador..."
 	$(MAKE) clasificador-api-init
 	$(MAKE) clasificador-api-plan
 	$(MAKE) clasificador-api-apply
+	@echo ">> Restaurando servicio web..."
+	@echo ">> NOTA: El web requiere que la imagen en ECR haya sido construida con los endpoints correctos."
+	@echo ">> Si los endpoints cambiaron, ejecuta 'make build-web-image && make push-web-image' antes de restaurar."
+	$(MAKE) web-init
+	$(MAKE) web-plan
+	$(MAKE) web-apply
 	@echo ">> Mostrando URLs de los servicios..."
 	$(MAKE) show_endpoints
-	@echo ">> Todos los servicios, load balancers y cluster ECS restaurados."
-	@echo ">> Verifica el estado con: make metricas-status, make generador-status, make clasificador-status"
+	@echo ">> Todos los servicios, load balancer y cluster ECS restaurados."
+	@echo ">> Verifica el estado con: make metricas-status, make generador-status, make clasificador-status, make web-status"

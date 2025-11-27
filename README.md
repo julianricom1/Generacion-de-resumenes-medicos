@@ -6,8 +6,92 @@ Sistema completo para generación, evaluación y clasificación de resúmenes m�
 - **Métricas**: 5 métricas para evaluar la calidad de los resúmenes generados
 - **Generador**: Servicio para generar resúmenes médicos usando modelos LLM fine-tuned
 - **Clasificador**: Servicio para clasificar textos médicos
+- **Web**: Interfaz de usuario React para interactuar con todos los servicios
 
-**En este sub-sistema se implementan 5 métricas que son relevantes para el problema de PLS**
+## Estructura del Repositorio
+
+```
+Generacion-de-resumenes.-medicos/
+├── clasificador_app/          # Servicio de clasificación de textos médicos
+│   ├── api.py                  # Endpoints FastAPI (/predict, /health)
+│   ├── main.py                 # Aplicación principal FastAPI
+│   ├── config.py               # Configuración del servicio
+│   ├── schemas/                 # Modelos Pydantic (request/response)
+│   ├── Dockerfile              # Imagen Docker del clasificador
+│   └── requirements.txt        # Dependencias Python
+│
+├── generator_app/              # Servicio de generación de resúmenes
+│   ├── api.py                  # Endpoints FastAPI (/generate, /health)
+│   ├── main.py                 # Aplicación principal FastAPI
+│   ├── config.py               # Configuración del servicio
+│   ├── helpers/                 # Utilidades (modelos fine-tuned, APIs externas)
+│   ├── schemas/                 # Modelos Pydantic (request/response)
+│   ├── merge_and_upload_to_s3.ipynb  # Notebook para merge y subida a S3
+│   ├── Dockerfile              # Imagen Docker del generador
+│   ├── entrypoint.sh           # Script de inicio (descarga modelo desde S3)
+│   └── requirements.txt        # Dependencias Python
+│
+├── metricas/                   # Servicio de evaluación de métricas
+│   ├── app.py                  # Aplicación principal FastAPI
+│   ├── metrics_client.py       # Cliente wrapper para uso fácil
+│   ├── utils/                   # Utilidades para cada métrica
+│   ├── schemas/                 # Modelos Pydantic
+│   ├── models/                  # Modelos AlignScore (.ckpt)
+│   ├── targets.json            # Valores objetivo para calibración
+│   ├── Dockerfile              # Imagen Docker de métricas
+│   ├── entrypoint.sh           # Script de inicio (descarga modelo desde S3)
+│   └── requirements.txt        # Dependencias Python
+│
+├── web/                        # Interfaz de usuario React
+│   ├── src/                    # Código fuente React
+│   │   ├── components/         # Componentes reutilizables
+│   │   ├── containers/         # Páginas/vistas principales
+│   │   ├── hooks/              # Custom hooks (useGeneration, useMetrics, etc.)
+│   │   └── App.jsx             # Componente principal
+│   ├── public/                 # Archivos estáticos
+│   ├── Dockerfile              # Build multi-stage (React + Nginx)
+│   ├── nginx.conf              # Configuración Nginx
+│   └── package.json            # Dependencias Node.js
+│
+├── terraform/                  # Infraestructura como código (AWS)
+│   ├── environments/           # Configuraciones por ambiente (student, prod)
+│   │   └── student/            # Variables y backends por stack
+│   ├── modules/                # Módulos reutilizables de Terraform
+│   └── stacks/                 # Stacks de infraestructura
+│       ├── vpc/                # VPC, subnets, NAT Gateway
+│       ├── ecs/                # Cluster ECS Fargate
+│       ├── registry/           # Repositorios ECR
+│       ├── alb/                # Network Load Balancer compartido
+│       └── app/                # Módulo genérico para servicios ECS
+│
+├── data/                       # Datasets y datos de entrenamiento
+│   ├── cleaned_train_dataset.csv
+│   ├── cleaned_val_dataset.csv
+│   └── cleaned_test_dataset.csv
+│
+├── model-pkg/                  # Paquetes Python de modelos (wheels) para el despliegue del clasificador
+│   └── textclf_svm-0.1.0-py3-none-any.whl
+│
+├── generacion/                 # Notebooks y resultados de experimentos
+│   ├── ollama/                 # Entrenamientos con Ollama
+│   ├── Qwen/                   # Entrenamientos con Qwen
+│   ├── SummLlama/              # Entrenamientos con SummLlama
+│   └── [varios notebooks de evaluación y auxiliares]
+│
+├── makefile                    # Comandos de automatización (build, deploy, etc.)
+├── KEYS.py                     # Configuración sensible (tokens, buckets S3)  * Este archivo debe ser agregado por el usuario, no se sbe al repositorio onlie ya que contiene secretos (safety concern)
+└── README.md                   # Este archivo
+```
+
+**Nota:** Los modelos entrenados no se encuentran en el repositorio online debido a su gran tamaño. Se provee como ejemplo el modelo utilizado en el despliegue en la nube: 
+https://huggingface.co/julianricom/meta-llama__Llama-3.2-3B-Instruct-6_epocas
+
+**Nota:** El servicio de clasificación (`clasificador_app/`) fue desarrollado y experimentado en un repositorio separado. Para más detalles sobre la experimentación, entrenamiento y evaluación del modelo de clasificación, consulta: [Clasificacion-de-textos-medicos](https://github.com/julianricom1/Clasificacion-de-textos-medicos)
+
+
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+**En este estudio se implementan 5 métricas que son relevantes para el problema de PLS**
 
 ## Qué mide cada métrica
 
@@ -20,14 +104,13 @@ Sistema completo para generación, evaluación y clasificación de resúmenes m�
 
 Las métricas de Relevancia y Factualidad requieren un modelo de lenguaje que soporte su operación
 En el caso de AlignScore, este requiere unos modelos especificos en formato **.ckpt** el cual debe ser 
-guardado en la carpeta **models**. Estos modelos están disponibles en el repositorio oficial de la 
+guardado en la carpeta **metricas/models**. Estos modelos están disponibles en el repositorio oficial de la 
 implementación de la métrica:
-
 
 **https://huggingface.co/yzha/AlignScore/tree/main**
 
 
-## Para ejecutar el sistema localmente se pueden usar los siguientes comandos:
+## Para ejecutar el sistema de metricas localmente se pueden usar los siguientes comandos:
 
 - Ubicarse en la raiz del repositorio
 - python -m venv .venv_metricas
@@ -47,7 +130,7 @@ implementación de la métrica:
     text-metrics:latest
 
 
-## Calibración (para la función de pérdida)
+## Calibración de las métricas (para la función de pérdida)
 
 - Para emular los textos creados por humanos expertos se propone una aproximación estadística en la que se calculan cada una de las métricas
 para el conjunto de entrenamiento. Esto con el objetivo de establecer valores objetivos a cumplir en las métricas del texto generado y con los
@@ -62,9 +145,10 @@ donde:
 - chunk_size : indica cada cuantos pasos se actualiza la barra de progreso
 
 ## Uso 
-- Para facilidad se incluye un wrapper para que en fases de complejidad (como el entrenamiento), se simplifique el proceso ed obtener las métricas
-y la pérdida
+- Para facilidad se incluye un wrapper para que en fases de complejidad (como el entrenamiento), se simplifica el proceso de obtener las métricas
+y la pérdida. A continuación un ejemplo de uso:
 
+```
 from metrics_client import getLoss, getRelevance, getFactuality, getReadability
 
 O = ["orig1", "orig2"]
@@ -74,22 +158,69 @@ print(getLoss(O, G, weights=[0.25,0.25,0.2,0.15,0.15]))
 print(getRelevance(O, G))
 print(getFactuality(O, G))
 print(getReadability(G))
+```
+
+----------------------------------------------------------------------------------------------------------------------------------------------------------
 
 ## Despliegue en AWS
 
 El proyecto incluye un Makefile con comandos para desplegar los servicios de métricas, generación y clasificación en AWS usando Terraform y ECS Fargate.
 
+### Prerrequisitos
+
+El proceso de despliegue fue desarrollado en Linux por lo que se recomienda su uso, aunque es compatible con Windows también. Antes de comenzar, asegúrate de tener configurado lo siguiente:
+
+0. **Herramientas necesarias**
+  - GNU Make
+  - Docker
+  - aws cli
+  - Terraform
+  - Python 3 + pip
+  - WSL (opcional pero recomendado si se quiere ejecutar el proceso desde windows)
+
+1. **Exportar ACCOUNT_ID de AWS:**
+   ```bash
+   export ACCOUNT_ID=123456789
+   ```
+   Reemplaza `123456789` con tu Account ID de AWS. 
+
+   **nota** para windows el comando es $Env:ACCOUNT_ID = "123456789" (PowerShell) o set ACCOUNT_ID=123456789 (cmd)
+
+2. **Configurar credenciales de AWS CLI:**
+   ```bash
+   aws configure
+   ```
+   Proporciona tus credenciales para el uso de aws cli.
+
+
+**Bootstrapping**
+
+El proceso requiere de 3 buckets s3 que soportan el despliegue
+- infrastructura-maia-g3: almacena el estado de la infrastructura para Terraform. Solo debe existir y ser accesible (no es necesario agregar nada)
+- modelo-factualidad-g3: almacena el modelo necesario para calcular AlignScore. Es el mismo que se encuentra en **metricas/models**
+- modelo-generador-maia-g3: Debe existir y er accesible. Va a contener el modelo comprimido para el generador de resumenes. (ver Paso 1 a continuación)
+
+
+
+```bash
+#PASO 1: Merge del modelo y subida a S3 (se hace una vez, localmente en Windows con Jupyter)
+#Abre, configura y ejecuta el notebook: generator_app/merge_and_upload_to_s3.ipynb
+```
+
 ### Comandos principales
 
 #### Despliegue completo
 ```bash
-# PASO 1: Merge y subida a S3 (hacer una vez, localmente en Windows con Jupyter)
-# Abre y ejecuta el notebook: generator_app/merge_and_upload_to_s3.ipynb
+# PASO 2: Desplegar toda la infraestructura (métricas + generador + clasificador + web)
+make startall MODEL_NAME=<nombre_del_modelo>
 
-# PASO 2: Desplegar toda la infraestructura (métricas + generador + clasificador)
+# por ejemplo: 
 make startall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
 
-# Destruir toda la infraestructura
+# Este proceso puede tardar mas de 45 minutos. 
+# Al final de este se imprimiran en la consola las direcciónes web de los endpoints individuales asi como de la interfaz de usuario a la que se debe acceder
+
+# Paso 3: Destruir toda la infraestructura
 make destroyall
 ```
 
@@ -111,33 +242,51 @@ make stop-metricas
 # Restaurar servicio (usa imagen existente en ECR, no reconstruye)
 make restore-metricas
 
-# Re-desplegar (reconstruir imagen y actualizar servicio)
+# Re-desplegar (reconstruir imagen y actualizar servicio. ùtil para cuando se hacen cambios como la capacidad de la máquina virtual)
 make redeploy-metricas
 ```
 
 **Generador:**
 ```bash
-# PASO 1: Merge y subida a S3 (hacer una vez, localmente en Windows con Jupyter)
-# Abre y ejecuta el notebook: generator_app/merge_and_upload_to_s3.ipynb
-# Este notebook:
-#   - Hace el merge del LoRA con el modelo base
-#   - Sube el modelo mergeado a S3: s3://modelo-generador-maia-g8/merged-models/{MODEL_NAME}/
 
-# PASO 2: Desplegar servicio generador (después del merge)
+# Desplegar servicio de Generación (incluye toda la infraestructura necesaria)
+make deploy-generador MODEL_NAME=<nombre_del_modelo>
+# Por ejemplo:
 make deploy-generador MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
 
 # Destruir servicio (elimina completamente)
 make destroy-generador
 
 # Detener servicio (preserva imagen en ECR, elimina solo el servicio ECS)
+make stop-generador MODEL_NAME=<nombre_del_modelo>
+# Por ejemplo:
 make stop-generador MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
 
 # Restaurar servicio (usa imagen existente en ECR, no reconstruye)
+make restore-generador MODEL_NAME=<nombre_del_modelo>
+# Por ejemplo:
 make restore-generador MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
 
-# Re-desplegar (reconstruir imagen y actualizar servicio)
+# Re-desplegar (reconstruir imagen y actualizar servicio. ùtil para cuando se hacen cambios como la capacidad de la máquina virtual o el modelo a utilizar)
+make redeploy-generador MODEL_NAME=<nombre_del_modelo>
+# Por ejemplo:
 make redeploy-generador MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
+
 ```
+
+**Nota importante sobre el generador:**
+
+Antes siquiera de subir el modelo a s3, es necesario configurar ciertas credenciales
+
+**Configura `KEYS.py`** (en la raíz del proyecto):
+   ```python
+   # Token de Hugging Face para acceder a modelos gated
+   HF_TOKEN = "tu_token_aqui"
+   
+   # Bucket S3 para modelos
+   MODEL_S3_BUCKET = "modelo-generador-maia-g3"
+   ```
+
 
 **Clasificador:**
 ```bash
@@ -155,65 +304,46 @@ make restore-clasificador
 
 # Re-desplegar (reconstruir imagen y actualizar servicio)
 make redeploy-clasificador
+```
 
-# Ver estado del servicio
-make clasificador-status
+**Web (Interfaz de Usuario):**
+```bash
+# Desplegar servicio web (requiere que los backends estén online)
+make deploy-web
+
+# Destruir servicio (elimina completamente)
+make destroy-web
+
+# Detener servicio (preserva imagen en ECR, elimina solo el servicio ECS)
+make stop-web
+
+# Restaurar servicio (usa imagen existente en ECR, no reconstruye)
+# NOTA: La imagen debe haber sido construida con los endpoints correctos
+make restore-web
+
+# Re-desplegar (reconstruir imagen con endpoints actualizados y actualizar servicio)
+make redeploy-web
+
 ```
 
 **Comandos para todos los servicios:**
 ```bash
-# Detener todos los servicios, load balancers y cluster ECS (preserva imágenes en ECR)
+# Detener todos los servicios, load balancer y cluster ECS (preserva imágenes en ECR)
 make stopall
 
-# Restaurar toda la infraestructura (cluster ECS + servicios + load balancers)
+# Restaurar toda la infraestructura (cluster ECS + servicios + load balancer + web)
+# NOTA: El web requiere que la imagen en ECR haya sido construida con los endpoints correctos
 make restoreall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas
 ```
 
 **Nota sobre stop vs destroy:**
-- `stop-*` / `stopall`: Elimina solo el servicio ECS (y load balancers/cluster en `stopall`), preserva las imágenes en ECR. Útil para ahorrar costos sin perder las imágenes Docker.
+- `stop-*` / `stopall`: Elimina solo el servicio ECS (y load balancer/cluster en `stopall`), preserva las imágenes en ECR. Útil para ahorrar costos sin perder las imágenes Docker.
 - `destroy-*` / `destroyall`: Elimina completamente el servicio y todos sus recursos. Útil para limpiar completamente.
 - `restore-*` / `restoreall`: Restaura el servicio usando las imágenes existentes en ECR (no reconstruye las imágenes). Más rápido que `deploy-*`.
+- **Nota sobre el web en `restoreall`**: El web requiere que la imagen en ECR haya sido construida con los endpoints correctos. Si los endpoints cambiaron, ejecuta `make redeploy-web` antes de restaurar.
 
-**Nota importante sobre el generador:**
 
-**PASO 1: Merge y subida a S3 (local, una vez)**
-
-1. **Configura `KEYS.py`** (en la raíz del proyecto):
-   ```python
-   # Token de Hugging Face para acceder a modelos gated
-   HF_TOKEN = "tu_token_aqui"
-   
-   # Bucket S3 para modelos
-   MODEL_S3_BUCKET = "modelo-generador-maia-g8"
-   ```
-
-2. **Abre el notebook**: `generator_app/merge_and_upload_to_s3.ipynb`
-
-3. **Ajusta los parámetros en el notebook:**
-   - `LORA_PATH`: Ruta al directorio `final` del LoRA entrenado
-   - `MODEL_NAME`: Se detecta automáticamente, pero puedes especificarlo manualmente
-   - `AWS_REGION`: Región de AWS (por defecto: `us-east-1`)
-
-4. **Ejecuta todas las celdas** en orden
-
-5. **El notebook:**
-   - Hace el merge del LoRA con el modelo base localmente
-   - Sube el modelo mergeado a S3: `s3://modelo-generador-maia-g8/merged-models/{MODEL_NAME}/`
-   - Muestra el `MODEL_NAME` que debes usar en el siguiente paso
-
-**PASO 2: Build y deploy**
-
-- El build de la imagen Docker se hace **localmente** (no requiere EC2)
-- Durante el build:
-  - La imagen Docker se construye localmente
-  - El modelo mergeado se descarga desde S3 al iniciar el contenedor (usando `entrypoint.sh`)
-- **Ventajas del nuevo enfoque:**
-  - No requiere permisos de EC2
-  - Build más rápido (local)
-  - El merge se hace una sola vez
-  - El modelo se descarga de S3 solo cuando se necesita
-
-**Configuración de recursos y parámetros del generador:**
+### Configuración de recursos y parámetros del generador:
 
 Los recursos (CPU, memoria) y parámetros de generación (MAX_NEW_TOKENS, TEMPERATURE) se configuran en el archivo `terraform/environments/student/generador/terraform.tfvars`:
 
@@ -239,14 +369,14 @@ env_vars = {
    - `cpu`: CPU en unidades (1024 = 1 vCPU). Valores comunes: 1024, 2048, 4096, 8192
    - `memory`: Memoria en MB. Debe ser compatible con Fargate según el CPU elegido
    - `MAX_NEW_TOKENS`: Número máximo de tokens a generar (ej: "256", "512", "1024")
-   - `TEMPERATURE`: Controla la aleatoriedad (0.0-2.0). Valores más bajos = más determinista
+   - `TEMPERATURE`: Controla la aleatoriedad 
 3. Aplica los cambios:
    ```bash
    make generador-plan
    make generador-apply
    ```
 
-**Nota sobre combinaciones CPU/Memoria válidas en Fargate:**
+**Combinaciones CPU/Memoria válidas en Fargate:**
 - 1 vCPU (1024): 2048, 3072, 4096 MB
 - 2 vCPU (2048): 4096, 5120, 6144, 7168, 8192, 10240, 12288, 16384 MB
 - 4 vCPU (4096): 8192, 16384, 30720, 32768 MB
@@ -255,7 +385,7 @@ env_vars = {
 ### Utilidades
 
 ```bash
-# Obtener URLs del NLB (muestra todos los endpoints de los servicios)
+# Obtener URLs del Load Blancer (muestra todos los endpoints de los servicios). Los servicios están disponibles en puertos diferentes usando un **Network Load Balancer (NLB) compartido** con múltiples listeners
 make show_endpoints
 
 # Ver estado del servicio de métricas
@@ -266,140 +396,7 @@ make generador-status
 
 # Ver estado del servicio clasificador
 make clasificador-status
+
+# Ver estado del servicio web
+make web-status
 ```
-
-### Endpoints de la API
-
-Una vez desplegados los servicios, puedes obtener las URLs usando `make show_endpoints`. Los servicios están disponibles en puertos diferentes usando Network Load Balancers (NLB):
-
-**Servicio de Métricas** (puerto 8001):
-- Base URL: `http://{nlb-metricas-dns}:8001`
-- Health check: `GET http://{nlb-metricas-dns}:8001/healthz`
-- Relevancia: `POST http://{nlb-metricas-dns}:8001/metrics/relevance`
-  ```json
-  {
-    "texts_original": ["texto original 1", "texto original 2"],
-    "texts_generated": ["texto generado 1", "texto generado 2"]
-  }
-  ```
-- Factualidad: `POST http://{nlb-metricas-dns}:8001/metrics/factuality`
-  ```json
-  {
-    "texts_original": ["texto original 1", "texto original 2"],
-    "texts_generated": ["texto generado 1", "texto generado 2"]
-  }
-  ```
-- Legibilidad: `POST http://{nlb-metricas-dns}:8001/metrics/readability`
-  ```json
-  {
-    "texts": ["texto 1", "texto 2", "texto 3"]
-  }
-  ```
-- Loss combinado: `POST http://{nlb-metricas-dns}:8001/loss`
-  ```json
-  {
-    "texts_original": ["texto original 1"],
-    "texts_human": ["texto humano 1"],
-    "texts_generated": ["texto generado 1"],
-    "weights": [0.25, 0.25, 0.2, 0.15, 0.15]
-  }
-  ```
-
-**Servicio Generador** (puerto 8000):
-- Base URL: `http://{nlb-generador-dns}:8000`
-- Health check (ECS): `GET http://{nlb-generador-dns}:8000/healthz`
-- Health check (API detallado): `GET http://{nlb-generador-dns}:8000/api/v1/health`
-- Generar resumen: `POST http://{nlb-generador-dns}:8000/api/v1/generate`
-  ```json
-  {
-    "inputs": ["Texto médico a resumir..."],
-    "model": "ollama_finned_tunned"
-  }
-  ```
-  **Modelos soportados:**
-  - `"ollama_finned_tunned"`: Modelo fine-tuned local
-  - `"claude-sonnet-4-5"`: Claude Sonnet 4.5 (requiere API key)
-  - `"gpt-4-turbo-preview"`: GPT-4 Turbo (requiere API key)
-  - `"gpt-5"`: GPT-5 (requiere API key)
-- Documentación interactiva: `http://{nlb-generador-dns}:8000/docs`
-
-**Servicio Clasificador** (puerto 8002):
-- Base URL: `http://{nlb-clasificador-dns}:8002`
-- Health check (ECS/NLB): `GET http://{nlb-clasificador-dns}:8002/healthz`
-- Health check (API detallado): `GET http://{nlb-clasificador-dns}:8002/api/v1/health`
-- Clasificar texto: `POST http://{nlb-clasificador-dns}:8002/api/v1/predict`
-  ```json
-  {
-    "inputs": ["texto médico a clasificar 1", "texto médico a clasificar 2"]
-  }
-  ```
-- Documentación interactiva: `http://{nlb-clasificador-dns}:8002/docs`
-
-**Nota:** Los NLB no tienen timeout de request (a diferencia del Application Load Balancer que tiene 60 segundos), por lo que pueden manejar requests largas sin problemas.
-
-### Proceso de merge y build del generador
-
-El proceso del generador se divide en dos pasos:
-
-#### PASO 1: Merge y subida a S3 (local, una vez)
-
-1. **Abre el notebook Jupyter**: `generator_app/merge_and_upload_to_s3.ipynb`
-2. **Configura el notebook:**
-   - Ajusta `LORA_PATH` si es necesario (ya viene con un ejemplo)
-   - El `MODEL_NAME` se detecta automáticamente del `LORA_PATH`
-   - Asegúrate de tener el token de Hugging Face en `KEYS.py`
-3. **Ejecuta todas las celdas:**
-   - Hace el merge del LoRA con el modelo base localmente
-   - Sube el modelo mergeado a S3: `s3://modelo-generador-maia-g8/merged-models/{MODEL_NAME}/`
-4. **Tiempo estimado**: 15-30 minutos (depende de la velocidad de descarga y merge)
-
-**Requisitos:**
-- Token de Hugging Face en `KEYS.py` (archivo en la raíz del proyecto)
-- Credenciales AWS configuradas para subir a S3
-- Dependencias: `torch`, `transformers`, `peft`, `huggingface-hub`, `boto3`
-
-#### PASO 2: Build y deploy (después del merge)
-
-1. **Build local de la imagen Docker:**
-   - Se construye localmente (no requiere EC2)
-   - El modelo mergeado se descarga desde S3 al iniciar el contenedor
-2. **Sube la imagen a ECR**
-3. **Despliega el servicio en ECS**
-
-**Ventajas del nuevo enfoque:**
-- **No requiere permisos de EC2**: todo se hace localmente
-- **Build más rápido**: no hay overhead de crear/destruir EC2
-- **El merge se hace una sola vez**: el modelo mergeado se reutiliza
-- **El modelo se descarga de S3 solo cuando se necesita**: más eficiente
-- **No necesitas tener el LoRA localmente**: se descarga desde S3 durante el merge
-
-**Configuración de los buckets S3:**
-- **Bucket del generador**: `modelo-generador-maia-g8`
-  - Modelos mergeados en S3: `s3://modelo-generador-maia-g8/merged-models/{MODEL_NAME}/`
-  - Este bucket no se modifica ni elimina por el proceso de deployment
-- **Bucket de métricas (factualidad)**: `modelo-factualidad`
-  - Modelo AlignScore: `s3://modelo-factualidad/AlignScore-base.ckpt`
-  - El modelo se descarga desde S3 al iniciar el contenedor de métricas
-
-### Notas importantes
-
-- **El merge se hace localmente** usando el notebook `generator_app/merge_and_upload_to_s3.ipynb`
-  - El notebook requiere el token de Hugging Face en `KEYS.py`
-  - El `MODEL_NAME` se detecta automáticamente del `LORA_PATH` o puedes especificarlo manualmente
-  - El modelo mergeado se sube a S3: `s3://modelo-generador-maia-g8/merged-models/{MODEL_NAME}/`
-- El comando `startall` y `deploy-generador` requieren especificar `MODEL_NAME` (no `LORA_PATH`)
-  - El `MODEL_NAME` es el nombre del modelo mergeado que está en S3
-  - Ejemplo: `make deploy-generador MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas`
-- El modelo mergeado debe estar previamente en S3 antes de hacer el deploy
-- Los servicios son independientes: puedes desplegar métricas, generador o clasificador por separado
-- **Métricas**: El modelo AlignScore se descarga desde `s3://modelo-factualidad/AlignScore-base.ckpt` al iniciar el contenedor
-- **Generador**: El modelo fine-tuned se descarga desde `s3://modelo-generador-maia-g8/merged-models/{MODEL_NAME}/` al iniciar el contenedor
-- **Clasificador**: No requiere configuración especial, solo ejecuta `make deploy-clasificador`
-- Cada servicio despliega su propia infraestructura (VPC, ECS, LB) si no existe
-- Los servicios se despliegan en ECS Fargate con Network Load Balancers (NLB):
-  - Métricas: `http://{nlb-metricas-dns}:8001`
-  - Generador: `http://{nlb-generador-dns}:8000`
-  - Clasificador: `http://{nlb-clasificador-dns}:8002`
-- **CloudWatch Logs no se usa**: los logs de los contenedores no se almacenan en CloudWatch
-- **Manejo automático de Terraform**: Los comandos de destroy (`destroy-metricas`, `destroy-generador`, `destroyall`, etc.) manejan automáticamente los problemas de lock file inconsistentes, ejecutando `init` cuando es necesario
-- **Bucket S3 del LoRA**: El bucket `modelo-generador-maia-g8` es permanente y no se modifica ni elimina por el proceso de deployment. Asegúrate de que el LoRA esté subido antes de ejecutar el build.

@@ -30,7 +30,7 @@ ENV ALIGNSCORE_MODEL=roberta-base \
     BERTSCORE_MODEL=roberta-large \
     TARGETS_FILE=targets.json \
     PORT=8008 \
-    MODEL_S3_BUCKET=modelo-factualidad
+    MODEL_S3_BUCKET=modelo-factualidad-g3
 
 # Copy entrypoint script
 COPY entrypoint.sh /app/entrypoint.sh
