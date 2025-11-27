@@ -10,12 +10,16 @@ import threading
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-SYSTEM_PROMPT = (
+SYSTEM_PROMPT = os.getenv(
+    "SYSTEM_PROMPT",
     "You simplify clinical trial protocol text into a plain-language summary for the general public. "
     "Keep to 6–8th grade readability, avoid diagnoses and speculation, no hallucinations, "
     "and preserve key facts (objective, population, interventions, outcomes, timelines, safety)."
 )
-USER_PREFIX = "Using the following clinical trial protocol text as input, create a plain language summary.\n\n"
+USER_PREFIX = os.getenv(
+    "USER_PREFIX",
+    "Using the following clinical trial protocol text as input, create a plain language summary.\n\n"
+)
 MODEL_PATH = os.getenv("MODEL_PATH", "/models")
 MODEL_NAME = os.getenv("MODEL_NAME", "")
 

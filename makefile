@@ -322,6 +322,8 @@ generador-init:
 	$(MAKE) tfinit STACK=generador TERRAFORM_ENV=$(TERRAFORM_ENV)
 generador-plan:
 	@if [ ! -d "terraform/stacks/generador/.terraform" ]; then $(MAKE) generador-init; fi
+	@echo ">> Leyendo API keys desde KEYS.py y agregándolas a terraform.tfvars..."
+	@python3 scripts/add_api_keys_to_tfvars.py || python scripts/add_api_keys_to_tfvars.py
 	$(MAKE) tfplan STACK=generador TERRAFORM_ENV=$(TERRAFORM_ENV)
 generador-apply:
 	@if [ ! -d "terraform/stacks/generador/.terraform" ]; then $(MAKE) generador-init; fi
@@ -623,7 +625,7 @@ purge-lb-enis:
 # =========================
 # Shortcuts Principales
 # =========================
-.PHONY: startall destroyall redeploy-metricas redeploy-generador redeploy-clasificador redeploy-web stop-metricas stop-generador stop-clasificador stop-web restore-metricas restore-generador restore-clasificador restore-web stopall restoreall
+.PHONY: startall destroyall redeploy-metricas redeploy-generador redeploy-max-specs redeploy-normal-specs redeploy-clasificador redeploy-web stop-metricas stop-generador stop-clasificador stop-web restore-metricas restore-generador restore-clasificador restore-web stopall restoreall
 startall:
 	@if [ -z "$(MODEL_NAME)" ]; then \
 	  echo "ERROR: MODEL_NAME no especificado. Ejemplo: make startall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas"; \
@@ -712,6 +714,43 @@ redeploy-generador:
 	@aws ecs update-service --cluster cluster_g3_MAIA --service generador-svc --force-new-deployment --region $(REGION) --output json | jq -r '.service | "Deployment iniciado: \(.deployments[0].id)\nEstado: \(.deployments[0].rolloutState)\nTask Definition: \(.taskDefinition)"' || \
 	  aws ecs update-service --cluster cluster_g3_MAIA --service generador-svc --force-new-deployment --region $(REGION) --output text --query 'service.serviceName' | xargs -I {} echo "Deployment iniciado para servicio: {}"
 	@echo ">> Redeploy iniciado. El servicio se actualizará en unos minutos."
+	@echo ">> Verifica el estado con: make generador-status"
+
+redeploy-max-specs:
+	@if [ -z "$(MODEL_NAME)" ]; then \
+	  echo "ERROR: MODEL_NAME no especificado. Ejemplo: make redeploy-max-specs MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas"; \
+	  exit 1; \
+	fi
+	@echo ">> Configurando generador con especificaciones máximas (16 CPU, 64 GB RAM)..."
+	@echo ">> NOTA: Para 16 vCPU, Fargate requiere memoria en incrementos de 8 GB (32-120 GB)"
+	@sed -i 's/^cpu            = [0-9][0-9]*/cpu            = 16384/' terraform/environments/student/generador/terraform.tfvars
+	@sed -i 's/^memory         = [0-9][0-9]*/memory         = 65536/' terraform/environments/student/generador/terraform.tfvars
+	@echo ">> Aplicando cambios en Terraform..."
+	$(MAKE) generador-init
+	$(MAKE) generador-plan
+	$(MAKE) generador-apply
+	@echo ">> Forzando actualización del servicio ECS..."
+	@aws ecs update-service --cluster cluster_g3_MAIA --service generador-svc --force-new-deployment --region $(REGION) --output json | jq -r '.service | "Deployment iniciado: \(.deployments[0].id)\nEstado: \(.deployments[0].rolloutState)\nTask Definition: \(.taskDefinition)"' || \
+	  aws ecs update-service --cluster cluster_g3_MAIA --service generador-svc --force-new-deployment --region $(REGION) --output text --query 'service.serviceName' | xargs -I {} echo "Deployment iniciado para servicio: {}"
+	@echo ">> Redeploy con especificaciones máximas iniciado. El servicio se actualizará en unos minutos."
+	@echo ">> Verifica el estado con: make generador-status"
+
+redeploy-normal-specs:
+	@if [ -z "$(MODEL_NAME)" ]; then \
+	  echo "ERROR: MODEL_NAME no especificado. Ejemplo: make redeploy-normal-specs MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas"; \
+	  exit 1; \
+	fi
+	@echo ">> Configurando generador con especificaciones normales (4 CPU, 16 GB RAM)..."
+	@sed -i 's/^cpu            = [0-9][0-9]*/cpu            = 4096/' terraform/environments/student/generador/terraform.tfvars
+	@sed -i 's/^memory         = [0-9][0-9]*/memory         = 16384/' terraform/environments/student/generador/terraform.tfvars
+	@echo ">> Aplicando cambios en Terraform..."
+	$(MAKE) generador-init
+	$(MAKE) generador-plan
+	$(MAKE) generador-apply
+	@echo ">> Forzando actualización del servicio ECS..."
+	@aws ecs update-service --cluster cluster_g3_MAIA --service generador-svc --force-new-deployment --region $(REGION) --output json | jq -r '.service | "Deployment iniciado: \(.deployments[0].id)\nEstado: \(.deployments[0].rolloutState)\nTask Definition: \(.taskDefinition)"' || \
+	  aws ecs update-service --cluster cluster_g3_MAIA --service generador-svc --force-new-deployment --region $(REGION) --output text --query 'service.serviceName' | xargs -I {} echo "Deployment iniciado para servicio: {}"
+	@echo ">> Redeploy con especificaciones normales iniciado. El servicio se actualizará en unos minutos."
 	@echo ">> Verifica el estado con: make generador-status"
 
 redeploy-clasificador:
@@ -812,7 +851,8 @@ restore-web:
 	@echo ">> Servicio restaurado. Verifica el estado con: make web-status"
 
 stopall:
-	@echo ">> Deteniendo todos los servicios, load balancer y cluster ECS (preservando imágenes en ECR)..."
+	@echo ">> Deteniendo todos los servicios ECS (preservando NLB, cluster ECS e imágenes en ECR)..."
+	@echo ">> NOTA: El NLB se mantiene activo (~\$0.54/día) para preservar los endpoints."
 	@echo ">> Deteniendo servicio de métricas..."
 	$(MAKE) destroy-metricas
 	@echo ">> Deteniendo servicio generador..."
@@ -821,31 +861,38 @@ stopall:
 	$(MAKE) destroy-clasificador
 	@echo ">> Deteniendo servicio web..."
 	$(MAKE) destroy-web
-	@echo ">> Destruyendo load balancer (NLB compartido)..."
-	$(MAKE) lb-destroy
-	@echo ">> Destruyendo cluster ECS..."
-	$(MAKE) ecs-destroy
-	@echo ">> Todos los servicios, load balancer y cluster ECS detenidos."
-	@echo ">> ECS está ahora vacío."
+	@echo ">> Todos los servicios ECS detenidos."
+	@echo ">> El cluster ECS está ahora vacío (no consume recursos)."
+	@echo ">> El NLB se mantiene activo (preserva los endpoints)."
 	@echo ">> Las imágenes en ECR se mantienen intactas."
-	@echo ">> Para restaurar todo, ejecuta: make restoreall MODEL_NAME=..."
+	@echo ">> Para restaurar los servicios, ejecuta: make restoreall MODEL_NAME=..."
 
 restoreall:
 	@if [ -z "$(MODEL_NAME)" ]; then \
 	  echo "ERROR: MODEL_NAME no especificado. Ejemplo: make restoreall MODEL_NAME=meta-llama__Llama-3.2-3B-Instruct-6_epocas"; \
 	  exit 1; \
 	fi
-	@echo ">> Restaurando toda la infraestructura (cluster ECS + servicios + load balancer)..."
-	@echo ">> Asumiendo que registry y VPC ya existen..."
+	@echo ">> Restaurando todos los servicios ECS..."
+	@echo ">> Asumiendo que registry, VPC, cluster ECS y NLB ya existen..."
 	@echo ">> NO se reconstruirán ni se empujarán las imágenes (usando imágenes existentes en ECR)..."
-	@echo ">> Recreando cluster ECS..."
-	$(MAKE) ecs-init
-	$(MAKE) ecs-plan
-	$(MAKE) ecs-apply
-	@echo ">> Recreando load balancer (NLB compartido)..."
-	$(MAKE) lb-init
-	$(MAKE) lb-plan
-	$(MAKE) lb-apply
+	@echo ">> Verificando cluster ECS..."
+	@if ! aws ecs describe-clusters --clusters cluster_g3_MAIA --region $(REGION) --query 'clusters[0].clusterName' --output text 2>/dev/null | grep -q "cluster_g3_MAIA"; then \
+	  echo ">> Cluster ECS no existe, creándolo..."; \
+	  $(MAKE) ecs-init; \
+	  $(MAKE) ecs-plan; \
+	  $(MAKE) ecs-apply; \
+	else \
+	  echo ">> Cluster ECS ya existe, saltando creación..."; \
+	fi
+	@echo ">> Verificando load balancer (NLB compartido)..."
+	@if ! aws elbv2 describe-load-balancers --names metricas-nlb-shared --region $(REGION) --query 'LoadBalancers[0].LoadBalancerName' --output text 2>/dev/null | grep -q "metricas-nlb-shared"; then \
+	  echo ">> NLB no existe, creándolo..."; \
+	  $(MAKE) lb-init; \
+	  $(MAKE) lb-plan; \
+	  $(MAKE) lb-apply; \
+	else \
+	  echo ">> NLB ya existe, saltando creación (endpoints se mantienen)..."; \
+	fi
 	@echo ">> Restaurando servicio de métricas..."
 	$(MAKE) metricas-init
 	$(MAKE) metricas-plan

@@ -15,5 +15,7 @@ env_vars = {
   TEMPERATURE = "0.2"
   TOP_P = "0.9"
   REPEAT_PENALTY = "1.015"
+  SYSTEM_PROMPT = "You simplify clinical trial protocol text into a plain-language summary for the general public. Keep to 6–8th grade readability, avoid diagnoses and speculation, no hallucinations, and preserve key facts (objective, population, interventions, outcomes, timelines, safety)."
+  USER_PREFIX = "Using the following clinical trial protocol text as input, create a plain language summary.\n\n"
 }
 
